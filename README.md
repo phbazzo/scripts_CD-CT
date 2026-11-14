@@ -1,12 +1,15 @@
-# MONAN com ICON e IFS como condição inicial e de contorno
+# MONAN com ICON e IFS como condição inicial e de contorno (porte para o `scripts_CD-CT` 1.6.0, não testado)
 
-> **English summary.** Fork of the official MONAN workflow scripts
-> ([`monanadmin/scripts_CD-CT`](https://github.com/monanadmin/scripts_CD-CT), release **1.6.0**) that adds
-> the **DWD ICON** and **ECMWF IFS** open-data forecasts as initial and lateral boundary conditions
-> (`EXP=ICON` / `EXP=IFS`), next to the existing GFS and ERA5. Data are downloaded automatically, converted
-> straight to WPS intermediate files (no `ungrib`/Vtable) and fed to `init_atmosphere`. Global and regional
-> modes, optional custom vertical grid (`config_specified_zeta_levels`). Tested end to end (regional 3 km mesh,
-> 75 levels) with GFS, ICON and IFS. Documentation is in Portuguese.
+> ⚠️ **A versão testada está em [phbazzo/MONAN-IFS-ICON](https://github.com/phbazzo/MONAN-IFS-ICON).** Lá estão os
+> scripts que rodaram a cadeia completa (pré-processamento, modelo e pós) com GFS, ICON e IFS e 75 níveis
+> verticais. Este *fork* leva as mesmas funções para o `scripts_CD-CT` 1.6.0 oficial, com mudanças mínimas, mas
+> **ainda não foi rodado**.
+>
+> **English summary.** Port of the ICON/IFS support to the official MONAN workflow scripts
+> ([`monanadmin/scripts_CD-CT`](https://github.com/monanadmin/scripts_CD-CT), release **1.6.0**): DWD ICON and
+> ECMWF IFS open-data forecasts as initial and lateral boundary conditions (`EXP=ICON` / `EXP=IFS`). **Not tested
+> yet**; the tested version is [phbazzo/MONAN-IFS-ICON](https://github.com/phbazzo/MONAN-IFS-ICON).
+> Documentation is in Portuguese.
 
 Este repositório é um *fork* dos scripts oficiais do MONAN (`scripts_CD-CT` 1.6.0). Ele acrescenta duas
 novas fontes de condição inicial (CI) e de contorno lateral (CC):
@@ -28,9 +31,8 @@ As mudanças nos scripts oficiais são pequenas e ficam marcadas com `[ICON/IFS]
 
 | O quê | Situação |
 |---|---|
-| Cadeia completa (pré-processamento → modelo → pós) com L75 (`ZETA_LEVELS=zeta_levels.L75.txt`), regional | **testada** com `EXP=GFS`, `ICON` e `IFS` em supercomputador PBS/Cray, malha regional de 3 km no Sul do Brasil (novembro de 2026, versão de desenvolvimento destes scripts) |
-| ICON regional, níveis do modelo (CI e LBC) | **testado** (ver linha acima) |
-| IFS regional, rodadas 00/12 UTC | **testado** (ver linha acima). Rodadas 06/18 UTC (stream `oper`, detectado automaticamente) ainda não testadas |
+| **Este porte para o 1.6.0** (patch, `instalar.sh`, recorte `auto`, ajuste automático de `config_nfglevels`) | **não testado.** O `instalar.sh` e o patch foram conferidos num clone limpo do 1.6.0 |
+| Download, conversão e cadeia completa com GFS, ICON e IFS (L75, regional 3 km) | **testados na versão de origem**, [phbazzo/MONAN-IFS-ICON](https://github.com/phbazzo/MONAN-IFS-ICON). Os conversores (`icon2wps.py`, `ifs2wps.py`, `icon_levels.py`) são praticamente os mesmos |
 | Modo global com ICON/IFS | implementado, **não testado** (exige muita memória no ICON, ver avisos) |
 | Qualidade das previsões | **não avaliada.** Compare com uma rodada GFS antes de usar em trabalho científico |
 
