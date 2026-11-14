@@ -23,7 +23,7 @@ then
    echo ""
    echo "${0} EXP RES_MESH LABELI FCST"
    echo ""
-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
+   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
@@ -69,7 +69,7 @@ START_HH="${YYYYMMDDHHi:8:2}"
 maxpostpernode=30    # <------ qtde max de convert_mpas por no!
 VARTABLE=".OPER"
 export DIRRUN=${DIRHOMED}/run.${YYYYMMDDHHi}; rm -fr ${DIRRUN}; mkdir -p ${DIRRUN}
-N_MODEL_LEV=55
+N_MODEL_LEV=${NVERTLEV:-55}   # [ICON/IFS] niveis do modelo (so no nome dos arquivos)
 NLEV=18
 #-------------------------------------------------------
 

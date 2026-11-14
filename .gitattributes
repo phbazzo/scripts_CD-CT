@@ -1,0 +1,6 @@
+# Scripts rodam em Linux: texto sempre com LF, mesmo editado no Windows
+* text=auto eol=lf
+*.nc binary
+*.grib2 binary
+*.bz2 binary
+*.png binary

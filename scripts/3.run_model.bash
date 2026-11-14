@@ -23,7 +23,7 @@ then
    echo ""
    echo "${0} EXP RES_MESH LABELI FCST"
    echo ""
-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
+   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
@@ -68,7 +68,7 @@ mkdir -p ${DATAOUT}/${YYYYMMDDHHi}/Model/logs
 start_date=${YYYYMMDDHHi:0:4}-${YYYYMMDDHHi:4:2}-${YYYYMMDDHHi:6:2}_${YYYYMMDDHHi:8:2}:00:00
 cores=${MODEL_ncores}
 hhi=${YYYYMMDDHHi:8:2}
-NLEV=55
+NLEV=${NVERTLEV:-55}   # [ICON/IFS] so entra no nome dos arquivos (os niveis vem do init.nc)
 CONFIG_CONV_INTERVAL="00:15:00"
 CONFIG_CONV_INTERVAL_SEC=$(echo "${CONFIG_CONV_INTERVAL}" | awk -F: '{print ($1 * 3600) + ($2 * 60) + $3}')
 VARTABLE=".OPER"
@@ -199,6 +199,14 @@ if grep -qE "^\s*config_native_gwd_gsl_static\s*=\s*true\s*(!.*)?$" ${SCRIPTS}/n
 else
     files_needed=("${SCRIPTS}/namelists/stream_list.atmosphere.output" "${SCRIPTS}/namelists/stream_list.atmosphere.diagnostics${VARTABLE}" "${SCRIPTS}/namelists/stream_list.atmosphere.surface" "${EXECS}/atmosphere_model" "${DATAIN}/fixed/x1.${RES}.static.nc" "${DATAIN}/fixed/x1.${RES}.graph.info.part.${cores}" "${DATAOUT}/${YYYYMMDDHHi}/Pre/x1.${RES}.init.nc" "${DATAIN}/fixed/Vtable.${EXP}" "${DATAIN}/fixed/ugwp_limb_tau.nc")
 fi
+# [ICON/IFS] O ICON e o IFS nao passam pelo ungrib, entao nao tem Vtable
+if [[ ${EXP} == "ICON" || ${EXP} == "IFS" ]]
+then
+   for i in "${!files_needed[@]}"
+   do
+      if [[ ${files_needed[$i]} == */Vtable.${EXP} ]]; then unset 'files_needed[i]'; fi
+   done
+fi
 
 for file in "${files_needed[@]}"
 do
@@ -217,7 +225,7 @@ cp -f ${DATAIN}/fixed/*DATA ${DIRRUN}
 cp -f ${DATAIN}/fixed/x1.${RES}.static.nc ${DIRRUN}
 cp -f ${DATAIN}/fixed/x1.${RES}.graph.info.part.${cores} ${DIRRUN}
 cp -f ${DATAOUT}/${YYYYMMDDHHi}/Pre/x1.${RES}.init.nc ${DIRRUN}
-cp -f ${DATAIN}/fixed/Vtable.${EXP} ${DIRRUN}
+if [[ ${EXP} != "ICON" && ${EXP} != "IFS" ]]; then cp -f ${DATAIN}/fixed/Vtable.${EXP} ${DIRRUN}; fi   # [ICON/IFS]
 cp -f ${DATAIN}/fixed/ugwp_limb_tau.nc ${DIRRUN}
 #check config_native_gwd_gsl_static is true you need ugwp_oro_data.nc file
 if grep -qE "^\s*config_native_gwd_gsl_static\s*=\s*true\s*(!.*)?$" ${SCRIPTS}/namelists/namelist.init_atmosphere.STATIC; then
@@ -230,7 +238,7 @@ fi
 if [[ $MODERUN == "R" ]]; then
    cp -f ${DATAOUT}/${YYYYMMDDHHi}/Pre/lbc*.nc ${DIRRUN}
 fi
-if [[ ${EXP} == "GFS" ||  ${EXP} == "ERA" ]]
+if [[ ${EXP} == "GFS" ||  ${EXP} == "ERA" || ${EXP} == "ICON" || ${EXP} == "IFS" ]]   # [ICON/IFS]
 then
    sed -e "s,#LABELI#,${start_date},g;s,#FCSTS#,${DD_HHMMSS_forecast},g;s,#RES#,${RES},g;
 s,#CONFIG_DT#,${CONFIG_DT},g;s,#CONFIG_LEN_DISP#,${CONFIG_LEN_DISP},g;s,#CONFIG_CONV_INTERVAL#,${CONFIG_CONV_INTERVAL},g;s,#APPLY_LBCS#,${APPLY_LBCS},g" \

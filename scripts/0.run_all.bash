@@ -21,7 +21,7 @@ EXECS=${DIRHOMED}/execs;               mkdir -p ${EXECS}
 github_link="https://github.com/monanadmin/MONAN-Model.git"   # Switch to your fork when you need to make changes or develop the model.
 monan_branch=2.0.0-rc
 convertmpas_branch=1.2.0
-EXP=GFS                    # (EXP) Options: GFS or ERA.
+EXP=GFS                    # (EXP) Options: GFS, ERA, ICON or IFS (ICON/IFS: only recent runs are online; see README).
 RES=655362                 # (RES_MESH) Options-Global:    40962 = 120km; 
                            #                              163842 =  60km;
 			   #                              655362 =  30Km;

@@ -1,0 +1,2524 @@
+diff --git a/scripts/0.run_all.bash b/scripts/0.run_all.bash
+index dcefbcd..7baa181 100755
+--- a/scripts/0.run_all.bash
++++ b/scripts/0.run_all.bash
+@@ -21,7 +21,7 @@ EXECS=${DIRHOMED}/execs;               mkdir -p ${EXECS}
+ github_link="https://github.com/monanadmin/MONAN-Model.git"   # Switch to your fork when you need to make changes or develop the model.
+ monan_branch=2.0.0-rc
+ convertmpas_branch=1.2.0
+-EXP=GFS                    # (EXP) Options: GFS or ERA.
++EXP=GFS                    # (EXP) Options: GFS, ERA, ICON or IFS (ICON/IFS: only recent runs are online; see README).
+ RES=655362                 # (RES_MESH) Options-Global:    40962 = 120km; 
+                            #                              163842 =  60km;
+ 			   #                              655362 =  30Km;
+diff --git a/scripts/2.pre_processing.bash b/scripts/2.pre_processing.bash
+index 94bca15..141e0c2 100755
+--- a/scripts/2.pre_processing.bash
++++ b/scripts/2.pre_processing.bash
+@@ -11,7 +11,8 @@ trap 'echo -e "\n${RED}==>${NC} $(basename "$0") failed.\n"' ERR
+ #     Performs the following tasks:
+ # 
+ #        o Creates topography, land use and static variables
+-#        o Ungrib GFS or ERA5 data
++#        o Downloads ICON (get_icon_dwd.bash) or IFS (get_ifs_ecmwf.bash) data   [ICON/IFS]
++#        o Ungrib GFS or ERA5 data, or converts ICON/IFS (icon2wps.py/ifs2wps.py) [ICON/IFS]
+ #        o Interpolates to model the grid
+ #        o Creates initial and boundary conditions
+ #        o Creates scripts to run the model and post-processing (CR: to be modified to phase 3 and 4)
+@@ -27,13 +28,18 @@ then
+    echo ""
+    echo "${0} EXP RES_MESH LABELI FCST"
+    echo ""
+-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
++   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
+    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
+    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
+    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
+    echo ""
+    echo "Example of a 24-hour forecast:"
+    echo "${0} GFS 655362 2026080100 24"
++   echo "${0} ICON 655362 $(date -u +%Y%m%d)00 24"
++   echo ""
++   echo "ICON and IFS are downloaded automatically (needs internet: run it on a login node)."
++   echo "Usually only RECENT runs are online: ICON (DWD) ~last 24 h; IFS (ECMWF) ~last 3 days,"
++   echo "or older IFS runs with 'export IFS_SOURCE=aws'. Files already in datain/ICON|IFS are reused."
+    echo ""
+    exit
+ fi
+@@ -80,6 +86,17 @@ export DIRRUN=${DIRHOMED}/run.${YYYYMMDDHHi}; rm -fr ${DIRRUN}; mkdir -p ${DIRRU
+ echo -e  "${GREEN}==>${NC} Scripts_CD-CT last commit: \n"
+ git log | head -1
+ 
++# [ICON/IFS] Download antes de tudo: se a rodada nao estiver mais online, para aqui.
++if [[ ${EXP} == "ICON" ]]
++then
++   echo -e "${GREEN}==>${NC} Downloading ICON ${YYYYMMDDHHi} (+${FCST} h)...\n"
++   time ./get_icon_dwd.bash ${YYYYMMDDHHi} ${FCST}
++elif [[ ${EXP} == "IFS" ]]
++then
++   echo -e "${GREEN}==>${NC} Downloading IFS ${YYYYMMDDHHi} (+${FCST} h)...\n"
++   time ./get_ifs_ecmwf.bash ${YYYYMMDDHHi} ${FCST}
++fi
++
+ if [ ! -d ${DATAIN}/fixed ]; then
+     echo -e "${GREEN}==>${NC} copying and linking fixed input data ${SYSTEM_KEYC}... \n"
+     mkdir -p ${DATAIN}
+@@ -172,7 +189,7 @@ cd ${SCRIPTS}
+ 
+ 
+ # Creating the x1.${RES}.static.nc file once, if does not exist yet:---------------
+-if [[ ${EXP} == "GFS" || ${EXP} == "ERA" ]]; then
++if [[ ${EXP} == "GFS" || ${EXP} == "ERA" || ${EXP} == "ICON" || ${EXP} == "IFS" ]]; then
+    if [ ! -s ${DATAIN}/fixed/x1.${RES}.static.nc ]
+    then
+       echo -e "${GREEN}==>${NC} Creating static.bash for submiting init_atmosphere to create x1.${RES}.static.nc...\n"
+@@ -182,7 +199,7 @@ if [[ ${EXP} == "GFS" || ${EXP} == "ERA" ]]; then
+    fi
+ else
+    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
+-   echo -e  "${RED}==>${NC} Static phase fails! Please select EXP=GFS or EXP=ERA.\n"
++   echo -e  "${RED}==>${NC} Static phase fails! Please select EXP=GFS, EXP=ERA, EXP=ICON or EXP=IFS.\n"
+    echo -e  "${RED}==>${NC} Exiting script. \n"
+    exit 1
+ fi
+@@ -198,21 +215,29 @@ elif [[ ${EXP} == "ERA" ]]
+ then
+    echo -e  "${GREEN}==>${NC} Submitting Degrib for ERA data...\n"
+    time ./make_degrib_ERA5.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST}
++elif [[ ${EXP} == "ICON" ]]
++then
++   echo -e  "${GREEN}==>${NC} Converting ICON data (CDO remap + icon2wps.py)...\n"
++   time ./make_degrib_ICON.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST}
++elif [[ ${EXP} == "IFS" ]]
++then
++   echo -e  "${GREEN}==>${NC} Converting IFS data (ifs2wps.py)...\n"
++   time ./make_degrib_IFS.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST}
+ else
+    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
+-   echo -e  "${RED}==>${NC} Degrib phase fails! Please select EXP=GFS or EXP=ERA.\n"
++   echo -e  "${RED}==>${NC} Degrib phase fails! Please select EXP=GFS, EXP=ERA, EXP=ICON or EXP=IFS.\n"
+    echo -e  "${RED}==>${NC} Exiting script. \n"
+    exit 1
+ fi
+ #----------------------------------------------------------------------------------
+ 
+ # Init Atmosphere phase:------------------------------------------------------------
+-if [[ ${EXP} == "GFS" || ${EXP} == "ERA" ]]; then
++if [[ ${EXP} == "GFS" || ${EXP} == "ERA" || ${EXP} == "ICON" || ${EXP} == "IFS" ]]; then
+    echo -e  "\n${GREEN}==>${NC} Submitting Init Atmosphere for real case...\n"
+    time ./make_initatmos.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST}
+ else
+    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
+-   echo -e  "${RED}==>${NC} Init Atmosphere phase fails! Please select EXP=GFS or EXP=ERA.\n"
++   echo -e  "${RED}==>${NC} Init Atmosphere phase fails! Please select EXP=GFS, EXP=ERA, EXP=ICON or EXP=IFS.\n"
+    echo -e  "${RED}==>${NC} Exiting script. \n"
+    exit 1
+ fi
+diff --git a/scripts/3.run_model.bash b/scripts/3.run_model.bash
+index 2ce3dd8..9f56bd1 100755
+--- a/scripts/3.run_model.bash
++++ b/scripts/3.run_model.bash
+@@ -23,7 +23,7 @@ then
+    echo ""
+    echo "${0} EXP RES_MESH LABELI FCST"
+    echo ""
+-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
++   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
+    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
+    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
+    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
+@@ -68,7 +68,7 @@ mkdir -p ${DATAOUT}/${YYYYMMDDHHi}/Model/logs
+ start_date=${YYYYMMDDHHi:0:4}-${YYYYMMDDHHi:4:2}-${YYYYMMDDHHi:6:2}_${YYYYMMDDHHi:8:2}:00:00
+ cores=${MODEL_ncores}
+ hhi=${YYYYMMDDHHi:8:2}
+-NLEV=55
++NLEV=${NVERTLEV:-55}   # [ICON/IFS] so entra no nome dos arquivos (os niveis vem do init.nc)
+ CONFIG_CONV_INTERVAL="00:15:00"
+ CONFIG_CONV_INTERVAL_SEC=$(echo "${CONFIG_CONV_INTERVAL}" | awk -F: '{print ($1 * 3600) + ($2 * 60) + $3}')
+ VARTABLE=".OPER"
+@@ -199,6 +199,14 @@ if grep -qE "^\s*config_native_gwd_gsl_static\s*=\s*true\s*(!.*)?$" ${SCRIPTS}/n
+ else
+     files_needed=("${SCRIPTS}/namelists/stream_list.atmosphere.output" "${SCRIPTS}/namelists/stream_list.atmosphere.diagnostics${VARTABLE}" "${SCRIPTS}/namelists/stream_list.atmosphere.surface" "${EXECS}/atmosphere_model" "${DATAIN}/fixed/x1.${RES}.static.nc" "${DATAIN}/fixed/x1.${RES}.graph.info.part.${cores}" "${DATAOUT}/${YYYYMMDDHHi}/Pre/x1.${RES}.init.nc" "${DATAIN}/fixed/Vtable.${EXP}" "${DATAIN}/fixed/ugwp_limb_tau.nc")
+ fi
++# [ICON/IFS] O ICON e o IFS nao passam pelo ungrib, entao nao tem Vtable
++if [[ ${EXP} == "ICON" || ${EXP} == "IFS" ]]
++then
++   for i in "${!files_needed[@]}"
++   do
++      if [[ ${files_needed[$i]} == */Vtable.${EXP} ]]; then unset 'files_needed[i]'; fi
++   done
++fi
+ 
+ for file in "${files_needed[@]}"
+ do
+@@ -217,7 +225,7 @@ cp -f ${DATAIN}/fixed/*DATA ${DIRRUN}
+ cp -f ${DATAIN}/fixed/x1.${RES}.static.nc ${DIRRUN}
+ cp -f ${DATAIN}/fixed/x1.${RES}.graph.info.part.${cores} ${DIRRUN}
+ cp -f ${DATAOUT}/${YYYYMMDDHHi}/Pre/x1.${RES}.init.nc ${DIRRUN}
+-cp -f ${DATAIN}/fixed/Vtable.${EXP} ${DIRRUN}
++if [[ ${EXP} != "ICON" && ${EXP} != "IFS" ]]; then cp -f ${DATAIN}/fixed/Vtable.${EXP} ${DIRRUN}; fi   # [ICON/IFS]
+ cp -f ${DATAIN}/fixed/ugwp_limb_tau.nc ${DIRRUN}
+ #check config_native_gwd_gsl_static is true you need ugwp_oro_data.nc file
+ if grep -qE "^\s*config_native_gwd_gsl_static\s*=\s*true\s*(!.*)?$" ${SCRIPTS}/namelists/namelist.init_atmosphere.STATIC; then
+@@ -230,7 +238,7 @@ fi
+ if [[ $MODERUN == "R" ]]; then
+    cp -f ${DATAOUT}/${YYYYMMDDHHi}/Pre/lbc*.nc ${DIRRUN}
+ fi
+-if [[ ${EXP} == "GFS" ||  ${EXP} == "ERA" ]]
++if [[ ${EXP} == "GFS" ||  ${EXP} == "ERA" || ${EXP} == "ICON" || ${EXP} == "IFS" ]]   # [ICON/IFS]
+ then
+    sed -e "s,#LABELI#,${start_date},g;s,#FCSTS#,${DD_HHMMSS_forecast},g;s,#RES#,${RES},g;
+ s,#CONFIG_DT#,${CONFIG_DT},g;s,#CONFIG_LEN_DISP#,${CONFIG_LEN_DISP},g;s,#CONFIG_CONV_INTERVAL#,${CONFIG_CONV_INTERVAL},g;s,#APPLY_LBCS#,${APPLY_LBCS},g" \
+diff --git a/scripts/4.run_post.bash b/scripts/4.run_post.bash
+index 74da27b..6c86e25 100755
+--- a/scripts/4.run_post.bash
++++ b/scripts/4.run_post.bash
+@@ -23,7 +23,7 @@ then
+    echo ""
+    echo "${0} EXP RES_MESH LABELI FCST"
+    echo ""
+-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
++   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
+    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
+    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
+    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
+@@ -69,7 +69,7 @@ START_HH="${YYYYMMDDHHi:8:2}"
+ maxpostpernode=30    # <------ qtde max de convert_mpas por no!
+ VARTABLE=".OPER"
+ export DIRRUN=${DIRHOMED}/run.${YYYYMMDDHHi}; rm -fr ${DIRRUN}; mkdir -p ${DIRRUN}
+-N_MODEL_LEV=55
++N_MODEL_LEV=${NVERTLEV:-55}   # [ICON/IFS] niveis do modelo (so no nome dos arquivos)
+ NLEV=18
+ #-------------------------------------------------------
+ 
+diff --git a/scripts/get_icon_dwd.bash b/scripts/get_icon_dwd.bash
+new file mode 100755
+index 0000000..9e22926
+--- /dev/null
++++ b/scripts/get_icon_dwd.bash
+@@ -0,0 +1,278 @@
++#!/bin/bash
++umask 022
++#-----------------------------------------------------------------------------#
++# !SCRIPT: get_icon_dwd                                           [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Baixa do DWD opendata o ICON global (malha icosaedrica R03B07, ~13 km,
++#     GRIB2 comprimido com bzip2) usado com EXP=ICON, e os pesos de
++#     remapeamento do CDO (so na primeira vez):
++#
++#        o ${DATAIN}/ICON/YYYYMMDDHH/*.grib2.bz2
++#        o ${DATAIN}/fixed/icon_cdo/{target_grid.txt,weights.nc}
++#        o ${DATAIN}/fixed/icon_hhl/*_HHL.grib2.bz2  (alturas dos niveis, 1 vez)
++#
++#     O DWD mantem so as rodadas das ultimas ~24 h (00, 06, 12 e 18 UTC).
++#     Solo, neve e gelo marinho sao baixados so na hora inicial; as LBCs
++#     (modo regional, a cada LBCINT) so precisam da atmosfera e da superficie.
++#
++#     ICON_VCOORD=model (padrao): atmosfera nos niveis do modelo do ICON.
++#        Os niveis sao escolhidos por icon_levels.py a partir do HHL e salvos
++#        em model_levels.txt: todos os niveis ate ICON_ZFULL (m acima do solo),
++#        acima disso um a cada ICON_THIN, e so UM nivel acima do topo do MONAN
++#        (ICON_ZTOP; vazio = config_ztop do namelist.init_atmosphere.TEMPLATE).
++#        Ao mudar algum deles, apague o model_levels.txt e o download_ok da rodada.
++#     ICON_VCOORD=pressure: os 18 niveis de pressao do opendata (1000-50 hPa).
++#
++#     Rodar de novo e seguro: arquivos completos nao sao baixados outra vez
++#     (wget -c) e, depois de um download completo (marcador download_ok), o
++#     DWD nem e consultado: a conversao pode ser refeita depois que a rodada
++#     saiu do opendata. Para forcar um novo download, apague o download_ok.
++#
++# !CALLING SEQUENCE:
++#     ./get_icon_dwd.bash LABELI FCST      (chamado pelo 2.pre_processing.bash)
++#-----------------------------------------------------------------------------#
++
++if [ $# -ne 2 ]
++then
++   echo ""
++   echo "Instructions: execute the command below"
++   echo ""
++   echo "${0} LABELI FCST"
++   echo ""
++   echo "LABELI      :: ICON run (YYYYMMDDHH, 00/06/12/18 UTC), one of the last ~24 h, e.g., $(date -u +%Y%m%d)00"
++   echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
++   echo ""
++   exit 1
++fi
++
++# Set environment variables exports:
++echo ""
++echo -e "\033[1;32m==>\033[0m Moduling environment for MONAN model...\n"
++. setenv.bash
++
++# Standart directories variables:---------------------------------------
++DIRHOMES=${DIR_SCRIPTS}/scripts_CD-CT;  mkdir -p ${DIRHOMES}
++DIRHOMED=${DIR_DADOS}/scripts_CD-CT;    mkdir -p ${DIRHOMED}
++SCRIPTS=${DIRHOMES}/scripts;            mkdir -p ${SCRIPTS}
++DATAIN=${DIRHOMED}/datain;              mkdir -p ${DATAIN}
++#----------------------------------------------------------------------
++
++# Input variables:--------------------------------------
++YYYYMMDDHHi=${1}; #YYYYMMDDHHi=2026110500
++FCST=${2};        #FCST=24
++#-------------------------------------------------------
++
++# Local variables--------------------------------------
++hhi=${YYYYMMDDHHi:8:2}
++BASEURL=https://opendata.dwd.de/weather/nwp/icon/grib/${hhi}
++OUT=${DATAIN}/ICON/${YYYYMMDDHHi};       mkdir -p ${OUT}
++ICONCDO=${DATAIN}/fixed/icon_cdo
++HHLDIR=${DATAIN}/fixed/icon_hhl
++NPROC=${ICON_NPROC:-8}
++VCOORD=${ICON_VCOORD:-model}
++#-------------------------------------------------------
++
++# Checagens rapidas (antes de qualquer download)--------
++if [[ ! ${hhi} =~ ^(00|06|12|18)$ ]]
++then
++   echo -e "${RED}==>${NC} ICON: LABELI must be a 00, 06, 12 or 18 UTC run (got ${YYYYMMDDHHi})."
++   exit 1
++fi
++if [[ ${VCOORD} != "model" && ${VCOORD} != "pressure" ]]
++then
++   echo -e "${RED}==>${NC} ICON_VCOORD must be model or pressure (got ${VCOORD})."
++   exit 1
++fi
++if [[ ${MODERUN} == "R" ]]
++then
++   # LBCs a cada LBCINT: o ICON tem saidas de hora em hora ate +78 h e de 3 em 3 h depois disso
++   if [ $((LBCINT % 3600)) -ne 0 ]
++   then
++      echo -e "${RED}==>${NC} ICON: LBCINT (${LBCINT} s, setenv.bash) must be a multiple of 3600 s."
++      exit 1
++   fi
++   dt=$((LBCINT / 3600))
++   # Horizonte do ICON global: 180 h nas rodadas 00/12 UTC, 120 h nas 06/18 UTC
++   if [[ ${hhi} == "00" || ${hhi} == "12" ]]; then maxf=180; else maxf=120; fi
++   if [ ${FCST} -gt ${maxf} ]
++   then
++      echo -e "${RED}==>${NC} ICON ${hhi} UTC runs go only up to +${maxf} h (FCST=${FCST})."
++      exit 1
++   fi
++   if [ ${FCST} -gt 78 ] && [ $((dt % 3)) -ne 0 ]
++   then
++      echo -e "${RED}==>${NC} ICON has 3-hourly output after +78 h: use LBCINT multiple of 10800 s or FCST <= 78."
++      exit 1
++   fi
++else
++   FCST=0; dt=1   # modo global: so a condicao inicial
++fi
++age=$(( ( $(date -u +%s) - $(date -u -d "${YYYYMMDDHHi:0:8} ${hhi}:00" +%s) ) / 3600 ))
++#-------------------------------------------------------
++
++# Python com numpy + eccodes (ICON_PYTHON ou ambiente conda; ver setenv.bash)
++PYTHON=$(find_python) || exit 1
++echo -e "${GREEN}==>${NC} Python for GRIB conversion: ${PYTHON}\n"
++
++# Pastas no DWD (minusculas) : nome da variavel nos arquivos (maiusculas)
++PL="t:T u:U v:V relhum:RELHUM fi:FI"
++ML="t:T u:U v:V qv:QV p:P"
++SL="ps:PS pmsl:PMSL t_2m:T_2M td_2m:TD_2M u_10m:U_10M v_10m:V_10M t_g:T_G"
++SL0="fr_ice:FR_ICE w_snow:W_SNOW h_snow:H_SNOW"
++SOIL0="t_so:T_SO w_so:W_SO"
++TI="hsurf:HSURF fr_land:FR_LAND"
++#-------------------------------------------------------
++
++
++# Rodada ja baixada por completo? O marcador download_ok guarda "FCST DT VCOORD". Se cobre o pedido
++# (mesmo DT e VCOORD, FCST >= o pedido) e os niveis escolhidos continuam la, nao consulta o DWD.
++if [ -s ${OUT}/download_ok ]
++then
++   read mfcst mdt mvcoord < ${OUT}/download_ok
++   if [[ ${mdt} == ${dt} && ${mvcoord} == ${VCOORD} && ${mfcst} -ge ${FCST} ]] && \
++      [[ ${VCOORD} != "model" || -s ${OUT}/model_levels.txt ]]
++   then
++      echo -e "${GREEN}==>${NC} ICON ${YYYYMMDDHHi} (+${mfcst} h, ${VCOORD} levels) already downloaded in ${OUT}. Skipping download.\n"
++      exit 0
++   fi
++fi
++
++if [ ${age} -gt 24 ]
++then
++   echo -e "${YELLOW}==>${NC} Warning: ICON ${YYYYMMDDHHi} is ${age} h old; DWD opendata keeps only the last ~24 h. Trying anyway...\n"
++fi
++
++
++# Pesos de remapeamento do CDO (ICON global R03B07 -> lat-lon 0.125 grau), uma vez:
++if [ ! -s ${ICONCDO}/target_grid.txt ] || [ ! -s ${ICONCDO}/weights.nc ]
++then
++   echo -e "${GREEN}==>${NC} Downloading CDO remapping weights from DWD...\n"
++   mkdir -p ${ICONCDO}
++   cd ${ICONCDO}
++   wget -c https://opendata.dwd.de/weather/lib/cdo/ICON_GLOBAL2WORLD_0125_EASY.tar.bz2 || exit 1
++   tar -xjf ICON_GLOBAL2WORLD_0125_EASY.tar.bz2 || exit 1
++   grid=$(find ${ICONCDO} -type f -name 'target_grid*.txt' | head -1)
++   weights=$(find ${ICONCDO} -type f -name 'weights*.nc' | head -1)
++   if [ -z "${grid}" ] || [ -z "${weights}" ]
++   then
++      echo -e "${RED}==>${NC} target_grid*.txt or weights*.nc not found in the tarball:"
++      find ${ICONCDO} -type f
++      exit 1
++   fi
++   ln -sf ${grid} target_grid.txt
++   ln -sf ${weights} weights.nc
++   rm -f ICON_GLOBAL2WORLD_0125_EASY.tar.bz2
++   cd - > /dev/null
++fi
++
++
++# Lista de arquivos:----------------------------------------------------
++# Campos com varios niveis de pressao/solo: nomes tirados da listagem da pasta no DWD
++listing () {
++   wget -qO- ${BASEURL}/${1}/ | grep -o "icon_global_icosahedral_${2}_${YYYYMMDDHHi}_[0-9]*_[0-9]*_${3}\.grib2\.bz2" | sort -u
++}
++
++if ! wget -qO- ${BASEURL}/ps/ | grep -q "single-level_${YYYYMMDDHHi}_000_PS"
++then
++   echo -e "${RED}==>${NC} ICON run ${YYYYMMDDHHi} not found at ${BASEURL}"
++   echo -e "${RED}==>${NC} DWD opendata keeps only the last ~24 h of runs (and a run appears ~3-4 h after its start)."
++   exit 1
++fi
++
++if [[ ${VCOORD} == "model" ]]
++then
++   # HHL (alturas das 121 meias-camadas), uma vez: nao muda entre rodadas
++   if [ $(ls ${HHLDIR}/*_HHL.grib2.bz2 2>/dev/null | wc -l) -lt 121 ]
++   then
++      echo -e "${GREEN}==>${NC} Downloading ICON HHL (model level heights) to ${HHLDIR}...\n"
++      mkdir -p ${HHLDIR}
++      for k in $(seq 1 121); do
++         echo "${BASEURL}/hhl/icon_global_icosahedral_time-invariant_${YYYYMMDDHHi}_${k}_HHL.grib2.bz2"
++      done | xargs -P ${NPROC} -n 1 wget -q -c -P ${HHLDIR}
++      if [ $(ls ${HHLDIR}/*_HHL.grib2.bz2 2>/dev/null | wc -l) -lt 121 ]
++      then
++         echo -e "${RED}==>${NC} HHL download incomplete in ${HHLDIR}. Run again to resume."
++         exit 1
++      fi
++   fi
++
++   # Topo do MONAN (m acima do nivel do mar): ICON_ZTOP ou config_ztop do namelist do init_atmosphere
++   ZTOP=${ICON_ZTOP:-$(nml_get ${SCRIPTS}/namelists/namelist.init_atmosphere.TEMPLATE config_ztop)}
++   if [ -z "${ZTOP}" ]
++   then
++      echo -e "${RED}==>${NC} config_ztop not found in ${SCRIPTS}/namelists/namelist.init_atmosphere.TEMPLATE (run 1.install_monan.bash or set ICON_ZTOP)."
++      exit 1
++   fi
++
++   # Niveis do modelo usados nesta rodada
++   if [ ! -s ${OUT}/model_levels.txt ]
++   then
++      echo -e "${GREEN}==>${NC} Selecting ICON model levels (icon_levels.py, ztop = ${ZTOP} m)...\n"
++      ${PYTHON} ${SCRIPTS}/icon_levels.py --hhl-dir ${HHLDIR} --ztop ${ZTOP} \
++         --zfull ${ICON_ZFULL:-16000} --thin ${ICON_THIN:-2} > ${OUT}/model_levels.txt
++      if [ $? -ne 0 ] || [ ! -s ${OUT}/model_levels.txt ]
++      then
++         rm -f ${OUT}/model_levels.txt
++         exit 1
++      fi
++   fi
++   MLEVELS=$(cat ${OUT}/model_levels.txt)
++   echo -e "\nICON model levels ($(echo ${MLEVELS} | wc -w)): ${MLEVELS}\n"
++fi
++
++urls=${OUT}/urls.txt; rm -f ${urls}
++for item in ${TI}; do
++   echo "${BASEURL}/${item%%:*}/icon_global_icosahedral_time-invariant_${YYYYMMDDHHi}_${item##*:}.grib2.bz2" >> ${urls}
++done
++if [[ ${VCOORD} == "model" ]]
++then
++   for ((hour=0; hour<=FCST; hour+=dt)); do
++      fff=$(printf "%03d" ${hour})
++      for item in ${ML}; do
++         for k in ${MLEVELS}; do
++            echo "${BASEURL}/${item%%:*}/icon_global_icosahedral_model-level_${YYYYMMDDHHi}_${fff}_${k}_${item##*:}.grib2.bz2" >> ${urls}
++         done
++      done
++   done
++else
++   for item in ${PL}; do
++      for f in $(listing ${item%%:*} pressure-level ${item##*:}); do
++         fff=$(echo ${f} | awk -F_ '{print $6}')
++         if [ $((10#${fff} % dt)) -eq 0 ] && [ $((10#${fff})) -le ${FCST} ]; then echo "${BASEURL}/${item%%:*}/${f}" >> ${urls}; fi
++      done
++   done
++fi
++for item in ${SOIL0}; do
++   for f in $(listing ${item%%:*} soil-level ${item##*:} | grep "_${YYYYMMDDHHi}_000_"); do
++      echo "${BASEURL}/${item%%:*}/${f}" >> ${urls}
++   done
++done
++for ((hour=0; hour<=FCST; hour+=dt)); do
++   fff=$(printf "%03d" ${hour})
++   vars=${SL}; [ ${hour} -eq 0 ] && vars="${SL} ${SL0}"
++   for item in ${vars}; do
++      echo "${BASEURL}/${item%%:*}/icon_global_icosahedral_single-level_${YYYYMMDDHHi}_${fff}_${item##*:}.grib2.bz2" >> ${urls}
++   done
++done
++#----------------------------------------------------------------------
++
++echo -e "${GREEN}==>${NC} Downloading $(wc -l < ${urls}) ICON files to ${OUT} (${NPROC} in parallel)...\n"
++xargs -P ${NPROC} -n 1 wget -q -c -P ${OUT} < ${urls}
++
++# Confere se veio tudo (horarios que ainda nao sairam no DWD tambem aparecem aqui)
++nmiss=0
++while read url; do
++   if [ ! -s ${OUT}/$(basename ${url}) ]; then echo "Missing: ${url}"; nmiss=$((nmiss + 1)); fi
++done < ${urls}
++nlev=$(grep -c "_000_[0-9]*_T\.grib2" ${urls})
++if [ ${nmiss} -ne 0 ] || [ ${nlev} -eq 0 ]
++then
++   echo -e "\n${RED}==>${NC} ${nmiss} files missing (${VCOORD} levels of T at +000 h: ${nlev})."
++   echo -e "${RED}==>${NC} If the run is still being published, wait and run again (downloads resume).\n"
++   exit 1
++fi
++
++rm -f ${urls}
++echo "${FCST} ${dt} ${VCOORD}" > ${OUT}/download_ok
++echo -e "\n${GREEN}==>${NC} ICON ${YYYYMMDDHHi} (+${FCST} h) downloaded: $(du -sh ${OUT} | cut -f1) in ${OUT}\n"
+diff --git a/scripts/get_ifs_ecmwf.bash b/scripts/get_ifs_ecmwf.bash
+new file mode 100755
+index 0000000..ca55eb6
+--- /dev/null
++++ b/scripts/get_ifs_ecmwf.bash
+@@ -0,0 +1,260 @@
++#!/bin/bash
++umask 022
++#-----------------------------------------------------------------------------#
++# !SCRIPT: get_ifs_ecmwf                                          [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Baixa o IFS (HRES) do ECMWF open data (GRIB2 em lat-lon regular) usado
++#     com EXP=IFS. Le o .index de cada arquivo do ECMWF e baixa so os campos
++#     necessarios (pedidos HTTP por faixa de bytes):
++#
++#        o ifs_pl.FFF.grib2  : t, u, v, r, gh em 14 niveis de pressao (1000-10 hPa)
++#        o ifs_sfc.FFF.grib2 : sp, msl, 2t, 2d, 10u, 10v, skt
++#        o ifs_sfc0.grib2    : z, lsm, sd, rsn, sithick (so a hora inicial)
++#        o ifs_sol.grib2     : sot, vsw nas 4 camadas de solo (so a hora inicial)
++#
++#     em ${DATAIN}/IFS/YYYYMMDDHH/ (FFF = hora de previsao).
++#
++#     Variaveis (setenv.bash):
++#     IFS_RESOL  = 0p1 (padrao), 0p25, ou 0p4-beta (datas antes de fev/2024)
++#     IFS_SOURCE = ecmwf (padrao; o portal guarda so os ~3 ultimos dias)
++#                  ou aws (arquivo do open data desde 2023)
++#     IFS_NPROC  = arquivos baixados em paralelo (padrao 8)
++#
++#     O stream e descoberto sozinho: "oper" (00/12 UTC, e 06/18 UTC nas datas
++#     recentes) ou "scda" (06/18 UTC em datas antigas). Arquivos ja baixados
++#     nao sao pedidos de novo (rodar outra vez e seguro e nao usa a rede).
++#
++# !CALLING SEQUENCE:
++#     ./get_ifs_ecmwf.bash LABELI FCST      (chamado pelo 2.pre_processing.bash)
++#-----------------------------------------------------------------------------#
++
++if [ $# -ne 2 ]
++then
++   echo ""
++   echo "Instructions: execute the command below"
++   echo ""
++   echo "${0} LABELI FCST"
++   echo ""
++   echo "LABELI      :: IFS run (YYYYMMDDHH), 00, 06, 12 or 18 UTC, e.g., $(date -u +%Y%m%d)00"
++   echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
++   echo ""
++   exit 1
++fi
++
++# Set environment variables exports:
++echo ""
++echo -e "\033[1;32m==>\033[0m Moduling environment for MONAN model...\n"
++. setenv.bash
++
++# Standart directories variables:---------------------------------------
++DIRHOMES=${DIR_SCRIPTS}/scripts_CD-CT;  mkdir -p ${DIRHOMES}
++DIRHOMED=${DIR_DADOS}/scripts_CD-CT;    mkdir -p ${DIRHOMED}
++DATAIN=${DIRHOMED}/datain;              mkdir -p ${DATAIN}
++#----------------------------------------------------------------------
++
++# Input variables:--------------------------------------
++YYYYMMDDHHi=${1}; #YYYYMMDDHHi=2026110500
++FCST=${2};        #FCST=24
++#-------------------------------------------------------
++
++# Local variables--------------------------------------
++hhi=${YYYYMMDDHHi:8:2}
++OUT=${DATAIN}/IFS/${YYYYMMDDHHi};       mkdir -p ${OUT}
++# O download so usa a biblioteca padrao do Python: qualquer python3 serve
++PYTHON=${ICON_PYTHON:-$(command -v python3)}
++#-------------------------------------------------------
++
++# Checagens rapidas (antes de qualquer download)--------
++if [[ ! ${hhi} =~ ^(00|06|12|18)$ ]]
++then
++   echo -e "${RED}==>${NC} IFS: LABELI must be a 00, 06, 12 or 18 UTC run (got ${YYYYMMDDHHi})."
++   exit 1
++fi
++if [[ ${MODERUN} == "R" ]]
++then
++   # Passos do IFS open data: de 3 em 3 h ate +144 h; depois de 6 em 6 h (so 00/12 UTC, ate +360 h)
++   if [ $((LBCINT % 10800)) -ne 0 ]
++   then
++      echo -e "${RED}==>${NC} IFS: LBCINT (${LBCINT} s, setenv.bash) must be a multiple of 10800 s (3 h)."
++      exit 1
++   fi
++   dt=$((LBCINT / 3600))
++   if [ ${FCST} -gt 144 ] && [ $((dt % 6)) -ne 0 ]
++   then
++      echo -e "${RED}==>${NC} IFS has 6-hourly output after +144 h: use LBCINT multiple of 21600 s or FCST <= 144."
++      exit 1
++   fi
++   if [[ ${hhi} == "06" || ${hhi} == "18" ]] && [ ${FCST} -gt 144 ]
++   then
++      echo -e "${RED}==>${NC} IFS 06/18 UTC runs go only up to +144 h (+90 h in older dates)."
++      exit 1
++   fi
++else
++   FCST=0; dt=3   # modo global: so a condicao inicial
++fi
++age=$(( ( $(date -u +%s) - $(date -u -d "${YYYYMMDDHHi:0:8} ${hhi}:00" +%s) ) / 3600 ))
++if [ ${age} -gt 72 ] && [[ ${IFS_SOURCE:-ecmwf} == "ecmwf" ]]
++then
++   echo -e "${YELLOW}==>${NC} Warning: IFS ${YYYYMMDDHHi} is ${age} h old; data.ecmwf.int keeps only ~3 days."
++   echo -e "${YELLOW}==>${NC} If it fails, use: export IFS_SOURCE=aws\n"
++fi
++#-------------------------------------------------------
++
++echo -e "${GREEN}==>${NC} Downloading IFS ${YYYYMMDDHHi} (+${FCST} h, every ${dt} h, ${IFS_RESOL:-0p1}, ${IFS_SOURCE:-ecmwf}, ${IFS_NPROC:-8} workers) to ${OUT} ...\n"
++
++${PYTHON} - ${YYYYMMDDHHi} ${FCST} ${dt} ${OUT} ${IFS_SOURCE:-ecmwf} ${IFS_RESOL:-0p1} ${IFS_NPROC:-8} << 'EOF' || exit 1
++import json
++import os
++import sys
++import threading
++import time
++import urllib.error
++import urllib.request
++from concurrent.futures import ThreadPoolExecutor, as_completed
++
++run, fcst, dt, out, source, resol = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6]
++nproc = max(1, int(sys.argv[7]))
++roots = {"ecmwf": "https://data.ecmwf.int/forecasts",
++         "aws": "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com"}
++if source not in roots:
++    sys.exit(f"IFS_SOURCE must be one of {list(roots)}")
++if resol not in ("0p1", "0p25", "0p4-beta"):
++    sys.exit("IFS_RESOL must be 0p1, 0p25 or 0p4-beta")
++hh = run[8:10]
++
++PL = {"t", "u", "v", "r", "gh"}
++PLEVS = {"1000", "925", "850", "700", "600", "500", "400", "300", "250", "200", "150", "100", "50", "10"}
++SFC = {"sp", "msl", "2t", "2d", "10u", "10v", "skt"}
++SFC0 = {"z", "lsm", "sd", "rsn", "sithick"}
++SFC0_REQUIRED = {"z", "lsm", "sd"}
++SOL = {"sot", "vsw"}
++MAXCHUNK = 64 * 1024 * 1024
++
++
++class NotFound(Exception):
++    pass
++
++
++def url(step, kind, stream):
++    # 0p1: arquivos -pl e -sfc separados; 0p25 e 0p4-beta: um arquivo so
++    suffix = f"-{kind}" if kind else ""
++    return f"{roots[source]}/{run[:8]}/{hh}z/ifs/{resol}/{stream}/{run}0000-{step}h-{stream}-fc{suffix}"
++
++
++def get(u, headers=None):
++    for attempt in range(5):
++        try:
++            with urllib.request.urlopen(urllib.request.Request(u, headers=headers or {}), timeout=120) as r:
++                return r.read()
++        except urllib.error.HTTPError as err:
++            if err.code in (403, 404):
++                raise NotFound(u) from err
++            if attempt == 4:
++                sys.exit(f"Failed to download {u}: {err}")
++        except Exception as err:  # noqa: BLE001 (rede instavel: tenta de novo)
++            if attempt == 4:
++                sys.exit(f"Failed to download {u}: {err}")
++        time.sleep(10 * (attempt + 1))
++
++
++pl_kind = "pl" if resol == "0p1" else ""
++sfc_kind = "sfc" if resol == "0p1" else ""
++
++# Stream: "oper" (00/12 UTC e, nas datas recentes, 06/18 UTC) ou "scda" (06/18 UTC em datas antigas).
++# Descoberto so quando algum arquivo precisa ser baixado (se ja estiver tudo em disco, nao usa a rede).
++_stream = []
++_lock = threading.Lock()
++def stream_name():
++    with _lock:
++        if not _stream:
++            for cand in ("oper", "scda") if hh in ("06", "18") else ("oper",):
++                try:
++                    get(url(0, sfc_kind, cand) + ".index")
++                    _stream.append(cand)
++                    break
++                except NotFound:
++                    pass
++            if not _stream:
++                sys.exit(f"IFS run {run} ({resol}) not found at {roots[source]}.\n"
++                         f"data.ecmwf.int keeps only ~3 days (older runs: IFS_SOURCE=aws); 0p1 exists only "
++                         f"for recent dates (try IFS_RESOL=0p25); before Feb/2024 use IFS_RESOL=0p4-beta.")
++            print(f"IFS stream: {_stream[0]}", flush=True)
++        return _stream[0]
++
++
++index_cache = {}
++def records(step, kind):
++    key = (step, kind)
++    if key not in index_cache:
++        u = url(step, kind, stream_name())
++        try:
++            lines = get(u + ".index").decode().splitlines()
++        except NotFound:
++            sys.exit(f"Step +{step} h not found ({u}.index): not published yet, "
++                     f"or beyond the forecast range of this run.")
++        index_cache[key] = [json.loads(line) for line in lines if line.strip()]
++    return index_cache[key]
++
++
++def download(name, parts, check):
++    """Junta em out/name os campos escolhidos de cada (passo, arquivo)."""
++    target = os.path.join(out, name)
++    if os.path.exists(target):
++        print(f"{name} already exists")
++        return
++    got = []
++    with open(target + ".part", "wb") as f:
++        for step, kind, select in parts:
++            # Campos vizinhos no arquivo do ECMWF viram um pedido so (ate MAXCHUNK bytes)
++            ranges = []
++            for rec in sorted((r for r in records(step, kind) if select(r)), key=lambda r: r["_offset"]):
++                off, length = rec["_offset"], rec["_length"]
++                if ranges and ranges[-1][1] == off and off + length - ranges[-1][0] <= MAXCHUNK:
++                    ranges[-1][1] = off + length
++                else:
++                    ranges.append([off, off + length])
++                got.append((rec["param"], rec.get("levelist")))
++            for start, end in ranges:
++                f.write(get(url(step, kind, stream_name()) + ".grib2", {"Range": f"bytes={start}-{end - 1}"}))
++    check(name, got)
++    os.rename(target + ".part", target)
++    print(f"{name}: {len(got)} fields", flush=True)
++
++
++def need(expected):
++    def check(name, got):
++        missing = sorted(expected - set(got))
++        if missing:
++            sys.exit(f"{name}: fields missing in the ECMWF files: {missing}")
++    return check
++
++
++jobs = [
++    ("ifs_sfc0.grib2", [(0, sfc_kind, lambda r: r["levtype"] == "sfc" and r["param"] in SFC0)],
++     need({(p, None) for p in SFC0_REQUIRED})),
++    ("ifs_sol.grib2", [(0, sfc_kind, lambda r: r["levtype"] == "sol" and r["param"] in SOL)],
++     need({(p, str(k)) for p in SOL for k in range(1, 5)})),
++]
++for step in range(0, fcst + 1, dt):
++    jobs.append((f"ifs_pl.{step:03d}.grib2",
++                 [(step, pl_kind, lambda r: r["levtype"] == "pl" and r["param"] in PL and r.get("levelist") in PLEVS)],
++                 need({(p, lev) for p in PL for lev in PLEVS})))
++    jobs.append((f"ifs_sfc.{step:03d}.grib2",
++                 [(step, sfc_kind, lambda r: r["levtype"] == "sfc" and r["param"] in SFC)],
++                 need({(p, None) for p in SFC})))
++
++# Um arquivo de saida por worker (IFS_NPROC); o primeiro erro interrompe tudo
++print(f"{len(jobs)} files with {nproc} workers", flush=True)
++with ThreadPoolExecutor(nproc) as pool:
++    futures = [pool.submit(download, *job) for job in jobs]
++    try:
++        for fut in as_completed(futures):
++            fut.result()
++    except BaseException:
++        for fut in futures:
++            fut.cancel()
++        raise
++EOF
++
++echo -e "\n${GREEN}==>${NC} IFS ${YYYYMMDDHHi} (+${FCST} h) downloaded: $(du -sh ${OUT} | cut -f1) in ${OUT}\n"
+diff --git a/scripts/icon2wps.py b/scripts/icon2wps.py
+new file mode 100755
+index 0000000..8e19aa9
+--- /dev/null
++++ b/scripts/icon2wps.py
+@@ -0,0 +1,467 @@
++#!/usr/bin/env python3
++#-----------------------------------------------------------------------------#
++# !SCRIPT: icon2wps.py                                           [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Converte o ICON global do DWD (malha icosaedrica, GRIB2 do opendata) em
++#     arquivos intermediarios do WPS (<PREFIX>:YYYY-MM-DD_HH), lidos direto pelo
++#     init_atmosphere do MONAN (config_met_prefix = '<PREFIX>').
++#
++#     Faz o papel do ungrib para o ICON:
++#        o bunzip2 + cdo remap (pesos do DWD) para lat-lon 0.125 + recorte
++#        o renomeia os campos para os nomes do WPS (TT, UU, VV, RH, GHT, ...)
++#        o atmosfera nos niveis do modelo (--vcoord model): T, U, V, QV e P do
++#          ICON, com GHT do HHL e o campo 3D PRESSURE; xlvl = numero do nivel
++#          (1 = topo), como nos niveis de modelo do ECMWF
++#        o ou nos 18 niveis de pressao do opendata (--vcoord pressure)
++#        o calcula a umidade especifica (SPECHUMD) e a UR em 2 m
++#        o umidade do solo: kg m-2 por camada -> m3 m-3
++#        o reagrupa o solo do ICON nas camadas do GFS (0-10/10-40/40-100/100-200 cm)
++#        o LANDSEA = FR_LAND >= 0.5
++#
++#     As profundidades do solo e os niveis de pressao vem das chaves GRIB2 de
++#     cada arquivo (os rotulos dos nomes do DWD misturam mm e cm no T_SO).
++#
++#     Requer: numpy, eccodes (python) e cdo.
++#
++# !CALLING SEQUENCE:
++#     icon2wps.py --indir DIR --run YYYYMMDDHH --fcst 48 --step 3 \
++#                 --grid target_grid.txt --weights weights.nc --outdir DIR
++#
++#-----------------------------------------------------------------------------#
++
++import argparse
++import datetime as dt
++import glob
++import os
++import shutil
++import struct
++import subprocess
++import sys
++import tempfile
++from concurrent.futures import ThreadPoolExecutor
++
++import eccodes
++import numpy as np
++
++G = 9.80665
++RD = 287.04
++
++# Fonte gravada no cabecalho de cada campo do intermediario (so informativo; o ifs2wps.py troca)
++MAP_SOURCE = "DWD ICON"
++
++# Niveis de pressao: variavel do ICON -> nome no WPS
++PL_VARS = {"T": "TT", "U": "UU", "V": "VV", "RELHUM": "RH", "FI": "GHT"}
++# Niveis do modelo (QV = umidade especifica, P = pressao)
++ML_VARS = ["T", "U", "V", "QV", "P"]
++# Superficie, em todos os horarios
++SL_VARS = ["PS", "PMSL", "T_2M", "TD_2M", "U_10M", "V_10M", "T_G"]
++# Superficie e solo, so na hora inicial (as LBCs nao usam)
++SL0_VARS = ["FR_ICE", "W_SNOW", "H_SNOW"]
++SOIL_VARS = ["T_SO", "W_SO"]
++# Invariantes no tempo
++TI_VARS = ["HSURF", "FR_LAND"]
++
++# Camadas de solo de destino (m)
++SOIL_LAYERS = [(0.0, 0.1), (0.1, 0.4), (0.4, 1.0), (1.0, 2.0)]
++
++
++def parse_args():
++    p = argparse.ArgumentParser(description="ICON (DWD opendata) -> intermediarios do WPS")
++    p.add_argument("--indir", required=True, help="pasta com os *.grib2.bz2 da rodada")
++    p.add_argument("--run", required=True, help="rodada do ICON (YYYYMMDDHH)")
++    p.add_argument("--fcst", type=int, default=0, help="horas de previsao (0 = so a CI)")
++    p.add_argument("--step", type=int, default=3, help="intervalo entre horarios (h)")
++    p.add_argument("--grid", required=True, help="grade de destino do CDO (target_grid*.txt)")
++    p.add_argument("--weights", required=True, help="pesos de remapeamento do CDO (weights*.nc)")
++    p.add_argument("--box", default="global",
++                   help="recorte lon1,lon2,lat1,lat2 (sellonlatbox) ou 'global'")
++    p.add_argument("--vcoord", choices=["model", "pressure"], default="model",
++                   help="atmosfera nos niveis do modelo ou nos niveis de pressao")
++    p.add_argument("--hhl-dir", help="pasta com os *_HHL.grib2.bz2 (obrigatoria com --vcoord model)")
++    p.add_argument("--prefix", default="ICON", help="prefixo dos intermediarios")
++    p.add_argument("--cdo", default="cdo", help="executavel do cdo")
++    p.add_argument("--nproc", type=int, default=8, help="arquivos processados em paralelo")
++    p.add_argument("--outdir", required=True, help="pasta de saida")
++    return p.parse_args()
++
++
++#
++# Leitura e remapeamento
++#
++
++def fixed_surface(gid, which):
++    """Valor (unidades SI) da superficie First/Second de uma mensagem GRIB2, ou None."""
++    key = f"scaledValueOf{which}FixedSurface"
++    if eccodes.codes_is_missing(gid, key):
++        return None
++    value = eccodes.codes_get(gid, key)
++    fkey = f"scaleFactorOf{which}FixedSurface"
++    factor = 0 if eccodes.codes_is_missing(gid, fkey) else eccodes.codes_get(gid, fkey)
++    return value * 10.0 ** (-factor)
++
++
++def read_level(path):
++    """(topo, base) do nivel do primeiro registro: Pa nos niveis de pressao, m no solo."""
++    with open(path, "rb") as f:
++        gid = eccodes.codes_grib_new_from_file(f)
++        try:
++            return fixed_surface(gid, "First"), fixed_surface(gid, "Second")
++        finally:
++            eccodes.codes_release(gid)
++
++
++def read_latlon(path):
++    """Campo lat-lon (sul -> norte) e sua geometria (lat1, lon1, dlat, dlon, nj, ni)."""
++    with open(path, "rb") as f:
++        gid = eccodes.codes_grib_new_from_file(f)
++        try:
++            ni = eccodes.codes_get(gid, "Ni")
++            nj = eccodes.codes_get(gid, "Nj")
++            lat1 = eccodes.codes_get(gid, "latitudeOfFirstGridPointInDegrees")
++            lon1 = eccodes.codes_get(gid, "longitudeOfFirstGridPointInDegrees")
++            dlat = eccodes.codes_get(gid, "jDirectionIncrementInDegrees")
++            dlon = eccodes.codes_get(gid, "iDirectionIncrementInDegrees")
++            south_first = eccodes.codes_get(gid, "jScansPositively") == 1
++            values = eccodes.codes_get_values(gid).reshape(nj, ni)
++            if eccodes.codes_get(gid, "bitmapPresent"):
++                values = np.where(values == eccodes.codes_get(gid, "missingValue"), np.nan, values)
++        finally:
++            eccodes.codes_release(gid)
++    if not south_first:
++        values = values[::-1]
++        lat1 = lat1 - (nj - 1) * dlat
++    if lon1 > 180.0:
++        lon1 -= 360.0
++    return values.astype(np.float32), (round(lat1, 6), round(lon1, 6), dlat, dlon, nj, ni)
++
++
++def regrid(path, args, tmpdir):
++    """bunzip2 + cdo remap/recorte de um arquivo do ICON -> (arquivo nativo, arquivo lat-lon).
++
++    Roda nas threads; a leitura com eccodes fica na thread principal."""
++    td = tempfile.mkdtemp(dir=tmpdir)
++    native = os.path.join(td, "native.grib2")
++    latlon = os.path.join(td, "latlon.grib2")
++    with open(native, "wb") as fo:
++        subprocess.run(["bunzip2", "-c", path], stdout=fo, check=True)
++    remap = f"remap,{args.grid},{args.weights}"
++    if args.box == "global":
++        ops = [remap]
++    else:
++        ops = [f"sellonlatbox,{args.box}", "-" + remap]
++    # cdo com caminho completo (ex.: do conda) roda sem o LD_LIBRARY_PATH do
++    # setenv.bash, para usar as proprias bibliotecas e nao as do compilador do modelo (em alguns sistemas
++    # Cray, o cdo de modulo falha com "CCE OpenMP fatal error: omp_set_num_threads ...")
++    env = None
++    if os.path.isabs(args.cdo):
++        env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
++    run = subprocess.run([args.cdo, "-s", "-f", "grb2", "-b", "F32", *ops, native, latlon],
++                         env=env, stderr=subprocess.PIPE, text=True)
++    # O ecCodes reclama da secao local (section2Padding) dos GRIB do DWD ao
++    # regravar; e inofensivo, entao so as outras mensagens vao para o log
++    msgs = [m for m in run.stderr.splitlines() if "section2Padding" not in m]
++    if msgs:
++        print("\n".join(msgs), file=sys.stderr, flush=True)
++    if run.returncode != 0:
++        raise subprocess.CalledProcessError(run.returncode, run.args)
++    return native, latlon
++
++
++def file_name(run, kind, var, fff=None):
++    if kind == "time-invariant":
++        return f"icon_global_icosahedral_time-invariant_{run}_{var}.grib2.bz2"
++    if kind == "single-level":
++        return f"icon_global_icosahedral_single-level_{run}_{fff}_{var}.grib2.bz2"
++    return f"icon_global_icosahedral_{kind}_{run}_{fff}_*_{var}.grib2.bz2"
++
++
++def level_of(path, native):
++    """Nivel de um arquivo: numero do nivel (niveis do modelo e HHL) ou chaves do GRIB."""
++    parts = os.path.basename(path).split("_")
++    if parts[3] == "model-level":
++        return int(parts[6]), None
++    if parts[-1].startswith("HHL."):
++        return int(parts[5]), None
++    return read_level(native)
++
++
++def find_jobs(args, fff):
++    """Lista (variavel, arquivo) de um horario; aborta se faltar algum arquivo."""
++    if args.vcoord == "model":
++        groups = [("model-level", ML_VARS), ("single-level", SL_VARS)]
++    else:
++        groups = [("pressure-level", list(PL_VARS)), ("single-level", SL_VARS)]
++    if fff == "000":
++        groups += [("single-level", SL0_VARS), ("soil-level", SOIL_VARS)]
++    jobs, missing = [], []
++    for kind, variables in groups:
++        for var in variables:
++            pattern = os.path.join(args.indir, file_name(args.run, kind, var, fff))
++            files = sorted(glob.glob(pattern))
++            if not files:
++                missing.append(pattern)
++            jobs += [(var, f) for f in files]
++    if missing:
++        sys.exit("Arquivos do ICON ausentes:\n  " + "\n  ".join(missing))
++    return jobs
++
++
++def process(pool, args, jobs, tmpdir):
++    """Remapeia os arquivos em paralelo -> {variavel: [(nivel, campo), ...]}, geometria."""
++    out, geo0 = {}, None
++    results = pool.map(lambda job: regrid(job[1], args, tmpdir), jobs)
++    for (var, path), (native, latlon) in zip(jobs, results):
++        level = level_of(path, native)
++        field, geo = read_latlon(latlon)
++        shutil.rmtree(os.path.dirname(native))
++        if geo0 is None:
++            geo0 = geo
++        elif geo != geo0:
++            sys.exit(f"Grade diferente em {path}: {geo} != {geo0}")
++        out.setdefault(var, []).append((level, field))
++    return out, geo0
++
++
++#
++# Conversoes
++#
++
++def esat(t):
++    """Pressao de vapor de saturacao (Pa) sobre agua, Bolton (1980)."""
++    return 611.2 * np.exp(17.67 * (t - 273.15) / (t - 29.65))
++
++
++def spechum(e, p):
++    return np.clip(0.622 * e / (p - 0.378 * e), 0.0, None)
++
++
++def fill_underground(cube, plev):
++    """Preenche pontos sem dado (abaixo do relevo) a partir do nivel de cima."""
++    t, fi = cube["T"], cube["FI"]
++    for k in range(1, len(plev)):
++        ratio = plev[k] / plev[k - 1]
++        miss = np.isnan(t[k])
++        t[k][miss] = t[k - 1][miss] * ratio ** (RD * 0.0065 / G)
++        miss = np.isnan(fi[k])
++        tm = 0.5 * (t[k] + t[k - 1])
++        fi[k][miss] = fi[k - 1][miss] - RD * tm[miss] * np.log(ratio)
++        for var in ("U", "V", "RELHUM"):
++            miss = np.isnan(cube[var][k])
++            cube[var][k][miss] = cube[var][k - 1][miss]
++
++
++def pressure_fields(res):
++    """Campos 3D (niveis do topo para a base) -> lista de (nome, unidade, descricao, nivel, campo)."""
++    plev = sorted(level[0] for level, _ in res["T"])
++    cube = {}
++    for var in PL_VARS:
++        by_p = {level[0]: field for level, field in res[var]}
++        if sorted(by_p) != plev:
++            sys.exit(f"{var}: niveis de pressao diferentes dos de T")
++        cube[var] = np.stack([by_p[p] for p in plev])
++    fill_underground(cube, plev)
++    for var, data in cube.items():
++        if np.isnan(data).any():
++            sys.exit(f"{var}: pontos sem dado mesmo depois do preenchimento")
++
++    fields = []
++    for k, p in enumerate(plev):
++        e = np.clip(cube["RELHUM"][k], 0.0, 100.0) / 100.0 * esat(cube["T"][k])
++        fields += [
++            ("TT", "K", "Temperature", p, cube["T"][k]),
++            ("UU", "m s-1", "U", p, cube["U"][k]),
++            ("VV", "m s-1", "V", p, cube["V"][k]),
++            ("RH", "%", "Relative Humidity", p, cube["RELHUM"][k]),
++            ("SPECHUMD", "kg kg-1", "Specific Humidity", p, spechum(e, p)),
++            ("GHT", "m", "Height", p, cube["FI"][k] / G),
++        ]
++    return fields, len(plev)
++
++
++def model_fields(res, hhl):
++    """Campos 3D nos niveis do modelo (xlvl = numero do nivel do ICON, 1 = topo).
++
++    O init_atmosphere usa o campo 3D PRESSURE (em vez do xlvl) e o GHT, que vem
++    da media das meias-camadas HHL acima e abaixo de cada nivel."""
++    levels = sorted(level[0] for level, _ in res["T"])
++    cube = {}
++    for var in ML_VARS:
++        by_k = {level[0]: field for level, field in res[var]}
++        if sorted(by_k) != levels:
++            sys.exit(f"{var}: niveis do modelo diferentes dos de T")
++        cube[var] = by_k
++
++    fields = []
++    for k in levels:
++        t, p = cube["T"][k], cube["P"][k]
++        q = np.clip(cube["QV"][k], 0.0, None)
++        e = q * p / (0.622 + 0.378 * q)
++        xlvl = float(k)
++        fields += [
++            ("TT", "K", "Temperature", xlvl, t),
++            ("UU", "m s-1", "U", xlvl, cube["U"][k]),
++            ("VV", "m s-1", "V", xlvl, cube["V"][k]),
++            ("SPECHUMD", "kg kg-1", "Specific Humidity", xlvl, q),
++            ("RH", "%", "Relative Humidity", xlvl, np.clip(100.0 * e / esat(t), 0.0, 100.0)),
++            ("PRESSURE", "Pa", "Pressure", xlvl, p),
++            ("GHT", "m", "Height", xlvl, 0.5 * (hhl[k] + hhl[k + 1])),
++        ]
++    for name, _, _, xlvl, data in fields:
++        if np.isnan(data).any():
++            sys.exit(f"{name} no nivel {xlvl:.0f}: campo com pontos sem dado")
++    return fields, len(levels)
++
++
++def soil_fields(res, skintemp):
++    """Solo do ICON -> SM/ST nas camadas do GFS."""
++    # Umidade: kg m-2 por camada -> m3 m-3, media ponderada pela sobreposicao
++    layers = [(level, field) for level, field in res["W_SO"]]
++    if any(bot is None for (_, bot), _ in layers):
++        sys.exit("W_SO sem a base da camada (Second fixed surface) no GRIB")
++    fields = []
++    for top, bot in SOIL_LAYERS:
++        acc = np.zeros_like(skintemp)
++        covered = 0.0
++        for (ltop, lbot), w in layers:
++            overlap = min(bot, lbot) - max(top, ltop)
++            if overlap > 0:
++                acc += np.nan_to_num(w) / (1000.0 * (lbot - ltop)) * overlap
++                covered += overlap
++        if abs(covered - (bot - top)) > 1e-6:
++            sys.exit(f"Camadas do W_SO nao cobrem {top}-{bot} m")
++        name = f"SM{round(top * 100):03d}{round(bot * 100):03d}"
++        fields.append((name, "m3 m-3", "Soil moisture", 200100.0, acc / (bot - top)))
++
++    # Temperatura: interpolacao linear no meio de cada camada
++    levels = sorted((level[0], field) for level, field in res["T_SO"])
++    depths = np.array([d for d, _ in levels])
++    tso = np.stack([f for _, f in levels])
++    for top, bot in SOIL_LAYERS:
++        z = 0.5 * (top + bot)
++        k = int(np.searchsorted(depths, z)) - 1
++        if k < 0 or k + 1 >= len(depths):
++            sys.exit(f"T_SO nao cobre a profundidade {z} m (niveis: {depths})")
++        w = (z - depths[k]) / (depths[k + 1] - depths[k])
++        layer = (1.0 - w) * tso[k] + w * tso[k + 1]
++        name = f"ST{round(top * 100):03d}{round(bot * 100):03d}"
++        fields.append((name, "K", "Soil temperature", 200100.0,
++                       np.where(np.isnan(layer), skintemp, layer)))
++    return fields
++
++
++def surface_fields(res, ti, initial):
++    one = {var: res[var][0][1] for var in SL_VARS + (SL0_VARS if initial else [])}
++    ps, t2, td2 = one["PS"], one["T_2M"], one["TD_2M"]
++    e = esat(td2)
++    fields = [
++        ("PSFC", "Pa", "Surface Pressure", 200100.0, ps),
++        ("PMSL", "Pa", "Sea-level Pressure", 201300.0, one["PMSL"]),
++        ("TT", "K", "Temperature", 200100.0, t2),
++        ("RH", "%", "Relative Humidity", 200100.0, np.clip(100.0 * e / esat(t2), 0.0, 100.0)),
++        ("SPECHUMD", "kg kg-1", "Specific Humidity", 200100.0, spechum(e, ps)),
++        ("UU", "m s-1", "U", 200100.0, one["U_10M"]),
++        ("VV", "m s-1", "V", 200100.0, one["V_10M"]),
++        ("SKINTEMP", "K", "Skin temperature", 200100.0, one["T_G"]),
++        ("SOILHGT", "m", "Terrain field of source analysis", 200100.0, ti["HSURF"]),
++        ("LANDSEA", "proprtn", "Land/Sea flag (1=land, 0=sea)", 200100.0, ti["LANDSEA"]),
++    ]
++    if initial:
++        fields += [
++            ("SEAICE", "proprtn", "Ice flag", 200100.0, np.nan_to_num(one["FR_ICE"])),
++            ("SNOW", "kg m-2", "Water equivalent snow depth", 200100.0, np.nan_to_num(one["W_SNOW"])),
++            ("SNOWH", "m", "Physical Snow Depth", 200100.0, np.nan_to_num(one["H_SNOW"])),
++        ]
++        fields += soil_fields(res, one["T_G"])
++    for name, _, _, _, data in fields:
++        if np.isnan(data).any():
++            sys.exit(f"{name}: campo com pontos sem dado")
++    return fields
++
++
++#
++# Escrita do intermediario do WPS
++#
++
++def write_record(f, payload):
++    marker = struct.pack(">i", len(payload))
++    f.write(marker + payload + marker)
++
++
++def write_field(f, hdate, geo, field, units, desc, xlvl, slab):
++    lat1, lon1, dlat, dlon, nj, ni = geo
++    write_record(f, struct.pack(">i", 5))
++    write_record(f, struct.pack(">24sf32s9s25s46sf3i",
++                                hdate.ljust(24).encode(), 0.0, MAP_SOURCE.ljust(32).encode(),
++                                field.ljust(9).encode(), units.ljust(25).encode(),
++                                desc.ljust(46).encode(), xlvl, ni, nj, 0))
++    write_record(f, struct.pack(">8s5f", b"SWCORNER", lat1, lon1, dlat, dlon, 6371.229))
++    write_record(f, struct.pack(">i", 0))   # is_wind_grid_rel = .false.
++    write_record(f, np.ascontiguousarray(slab, dtype=">f4").tobytes())
++
++
++def main():
++    args = parse_args()
++    run = dt.datetime.strptime(args.run, "%Y%m%d%H")
++    os.makedirs(args.outdir, exist_ok=True)
++    tmpdir = tempfile.mkdtemp(prefix="icon2wps_", dir=args.outdir)
++    try:
++        with ThreadPoolExecutor(args.nproc) as pool:
++            jobs = [(v, os.path.join(args.indir, file_name(args.run, "time-invariant", v)))
++                    for v in TI_VARS]
++            missing = [path for _, path in jobs if not os.path.isfile(path)]
++
++            # Niveis do modelo: os mesmos baixados para a hora inicial, mais as
++            # meias-camadas HHL acima (k) e abaixo (k+1) de cada um
++            if args.vcoord == "model":
++                if not args.hhl_dir:
++                    sys.exit("--hhl-dir e obrigatorio com --vcoord model")
++                t0 = glob.glob(os.path.join(args.indir, file_name(args.run, "model-level", "T", "000")))
++                levels = sorted(int(os.path.basename(f).split("_")[6]) for f in t0)
++                if not levels:
++                    sys.exit(f"Nenhum arquivo de T nos niveis do modelo em {args.indir}")
++                for k in sorted({h for lev in levels for h in (lev, lev + 1)}):
++                    pattern = os.path.join(args.hhl_dir,
++                                           f"icon_global_icosahedral_time-invariant_*_{k}_HHL.grib2.bz2")
++                    files = glob.glob(pattern)
++                    if files:
++                        jobs.append(("HHL", files[0]))
++                    else:
++                        missing.append(pattern)
++
++            if missing:
++                sys.exit("Arquivos do ICON ausentes:\n  " + "\n  ".join(missing))
++            res, geo_ti = process(pool, args, jobs, tmpdir)
++            ti = {"HSURF": np.nan_to_num(res["HSURF"][0][1]),
++                  "LANDSEA": (np.nan_to_num(res["FR_LAND"][0][1]) >= 0.5).astype(np.float32)}
++            hhl = {level[0]: field for level, field in res.get("HHL", [])}
++
++            for hour in range(0, args.fcst + 1, args.step):
++                fff = f"{hour:03d}"
++                valid = run + dt.timedelta(hours=hour)
++                hdate = f"{valid:%Y-%m-%d_%H}:00:00"
++                jobs = find_jobs(args, fff)
++                print(f"{hdate}: remapeando {len(jobs)} arquivos ...", flush=True)
++                res, geo = process(pool, args, jobs, tmpdir)
++                if geo != geo_ti:
++                    sys.exit(f"Grade dos invariantes {geo_ti} != grade de {fff} {geo}")
++
++                if args.vcoord == "model":
++                    fields, nlev = model_fields(res, hhl)
++                else:
++                    fields, nlev = pressure_fields(res)
++                fields += surface_fields(res, ti, initial=(hour == 0))
++
++                out = os.path.join(args.outdir, f"{args.prefix}:{valid:%Y-%m-%d_%H}")
++                with open(out, "wb") as f:
++                    for name, units, desc, xlvl, data in fields:
++                        write_field(f, hdate, geo, name, units, desc, xlvl, data)
++                kind = "do modelo" if args.vcoord == "model" else "de pressao"
++                print(f"   -> {out} ({len(fields)} campos, {nlev} niveis {kind}, "
++                      f"grade {geo[5]}x{geo[4]})", flush=True)
++    finally:
++        shutil.rmtree(tmpdir, ignore_errors=True)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/icon_levels.py b/scripts/icon_levels.py
+new file mode 100755
+index 0000000..797c910
+--- /dev/null
++++ b/scripts/icon_levels.py
+@@ -0,0 +1,103 @@
++#!/usr/bin/env python3
++#-----------------------------------------------------------------------------#
++# !SCRIPT: icon_levels.py                                         [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Escolhe quais niveis do modelo do ICON (1 = topo ... 120 = base) usar
++#     como first guess do MONAN, a partir das alturas das meias-camadas
++#     (HHL, invariante no tempo, em metros acima do nivel do mar):
++#
++#        o todos os niveis com altura media acima do solo <= --zfull
++#        o acima disso, um a cada --thin niveis
++#        o exatamente UM nivel acima do topo do MONAN: o mais baixo cuja
++#          altura MINIMA acima do nivel do mar (em todo o globo) passa de
++#          --ztop. O init_atmosphere precisa de um nivel do first guess acima
++#          de config_ztop para interpolar (e nao extrapolar) as camadas mais
++#          altas; niveis mais altos que esse nao sao usados.
++#
++#     O ztop e comparado com a altura acima do nivel do mar (como o
++#     config_ztop do MPAS/MONAN), e nao com a altura acima do solo.
++#
++#     Imprime os niveis escolhidos (stdout) e a tabela de alturas (stderr).
++#
++# !CALLING SEQUENCE:
++#     icon_levels.py --hhl-dir DIR --ztop 30000 [--zfull 16000] [--thin 2]
++#
++#-----------------------------------------------------------------------------#
++
++import argparse
++import glob
++import os
++import subprocess
++import sys
++import tempfile
++
++import eccodes
++import numpy as np
++
++
++def read_hhl(hhl_dir, k, tmpdir):
++    """Alturas (m acima do nivel do mar) da meia-camada k (.grib2.bz2)."""
++    files = glob.glob(os.path.join(hhl_dir, f"icon_global_icosahedral_time-invariant_*_{k}_HHL.grib2.bz2"))
++    if not files:
++        sys.exit(f"HHL do nivel {k} ausente em {hhl_dir}")
++    native = os.path.join(tmpdir, "hhl.grib2")
++    with open(native, "wb") as fo:
++        subprocess.run(["bunzip2", "-c", files[0]], stdout=fo, check=True)
++    with open(native, "rb") as f:
++        gid = eccodes.codes_grib_new_from_file(f)
++        try:
++            return np.asarray(eccodes.codes_get_values(gid), dtype=np.float64)
++        finally:
++            eccodes.codes_release(gid)
++
++
++def main():
++    p = argparse.ArgumentParser(description="Selecao dos niveis do modelo do ICON")
++    p.add_argument("--hhl-dir", required=True, help="pasta com os *_HHL.grib2.bz2 (1 a 121)")
++    p.add_argument("--ztop", type=float, required=True,
++                   help="topo do MONAN (m acima do nivel do mar, config_ztop)")
++    p.add_argument("--zfull", type=float, default=16000.0, help="abaixo desta altura (m) usa todos os niveis")
++    p.add_argument("--thin", type=int, default=2, help="acima de --zfull usa um a cada N niveis")
++    args = p.parse_args()
++
++    # Sobe da base (meia-camada 121 = superficie) ate o primeiro nivel cheio
++    # que esta acima de --ztop em todo o globo. Guarda so duas meias-camadas
++    # por vez (cada uma tem ~2,9 milhoes de pontos).
++    z_agl, z_msl_min, top = {}, {}, None
++    with tempfile.TemporaryDirectory() as td:
++        lower = read_hhl(args.hhl_dir, 121, td)
++        sfc_mean = float(lower.mean())
++        for k in range(120, 0, -1):
++            upper = read_hhl(args.hhl_dir, k, td)
++            full = 0.5 * (upper + lower)
++            z_agl[k] = float(full.mean()) - sfc_mean   # altura media acima do solo
++            z_msl_min[k] = float(full.min())           # altura minima acima do mar
++            lower = upper
++            if z_msl_min[k] > args.ztop:
++                top = k
++                break
++    if top is None:
++        sys.exit(f"Nenhum nivel do ICON passa de --ztop = {args.ztop:.0f} m")
++
++    chosen, above = [top], 0
++    for k in range(120, top, -1):
++        if z_agl[k] <= args.zfull:
++            chosen.append(k)
++        else:
++            if above % args.thin == 0:
++                chosen.append(k)
++            above += 1
++
++    print(f"  nivel   altura media AGL   altura minima MSL", file=sys.stderr)
++    for k in range(top, 121):
++        mark = "*" if k in chosen else " "
++        print(f"{mark} nivel {k:3d}: {z_agl[k]:9.1f} m        {z_msl_min[k]:9.1f} m", file=sys.stderr)
++    print(f"{len(chosen)} niveis escolhidos; topo do first guess: nivel {top} "
++          f"(>= {z_msl_min[top]:.0f} m MSL, ztop = {args.ztop:.0f} m); "
++          f"config_nfglevels precisa ser >= {len(chosen) + 1}", file=sys.stderr)
++    print(" ".join(str(k) for k in sorted(chosen)))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/ifs2wps.py b/scripts/ifs2wps.py
+new file mode 100755
+index 0000000..82793d4
+--- /dev/null
++++ b/scripts/ifs2wps.py
+@@ -0,0 +1,209 @@
++#!/usr/bin/env python3
++#-----------------------------------------------------------------------------#
++# !SCRIPT: ifs2wps.py                                            [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Converte o IFS (HRES) do ECMWF open data (GRIB2 em lat-lon regular,
++#     baixado pelo get_ifs_ecmwf.bash) em arquivos intermediarios do WPS
++#     (<PREFIX>:YYYY-MM-DD_HH), lidos direto pelo init_atmosphere do MONAN.
++#
++#     Arquivos: ifs_sfc0.grib2, ifs_sol.grib2 (hora inicial) e, para cada hora
++#     FFF, ifs_pl.FFF.grib2 e ifs_sfc.FFF.grib2. Funciona com 0.1, 0.25 e 0.4 deg.
++#
++#     Os dados ja vem em lat-lon, entao nao ha remapeamento: so recorte. As
++#     conversoes e a escrita sao as mesmas do icon2wps.py (importado daqui):
++#        o 14 niveis de pressao (t, u, v, r, gh) -> TT, UU, VV, RH, SPECHUMD, GHT
++#        o superficie (sp, msl, 2t, 2d, 10u, 10v, skt), orografia (z) e lsm
++#        o solo do IFS (sot, vsw nas camadas 0-7, 7-28, 28-100, 100-289 cm)
++#          reagrupado nas camadas do GFS, como no ICON
++#        o neve (sd, rsn) e gelo marinho (sithick > 0)
++#
++#     Requer: numpy e eccodes (python), e o icon2wps.py na mesma pasta.
++#
++# !CALLING SEQUENCE:
++#     ifs2wps.py --indir DIR --run YYYYMMDDHH --fcst 48 --step 3 --outdir DIR
++#
++#-----------------------------------------------------------------------------#
++
++import argparse
++import datetime as dt
++import os
++import sys
++
++import eccodes
++import numpy as np
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import icon2wps as wps  # noqa: E402  (conversoes e escrita do intermediario)
++
++# Niveis de pressao e superficie: shortName do IFS -> nome usado no icon2wps
++PL_VARS = {"t": "T", "u": "U", "v": "V", "r": "RELHUM", "gh": "FI"}
++SFC_VARS = {"sp": "PS", "msl": "PMSL", "2t": "T_2M", "2d": "TD_2M",
++            "10u": "U_10M", "10v": "V_10M", "skt": "T_G"}
++# Camadas de solo do IFS (m): nivel n do GRIB = camada n
++SOIL_LAYERS = {1: (0.0, 0.07), 2: (0.07, 0.28), 3: (0.28, 1.0), 4: (1.0, 2.89)}
++
++
++def parse_args():
++    p = argparse.ArgumentParser(description="IFS (ECMWF open data) -> intermediarios do WPS")
++    p.add_argument("--indir", required=True, help="pasta com os ifs_*.grib2 da rodada")
++    p.add_argument("--run", required=True, help="rodada do IFS (YYYYMMDDHH)")
++    p.add_argument("--fcst", type=int, default=0, help="horas de previsao (0 = so a CI)")
++    p.add_argument("--step", type=int, default=3, help="intervalo entre horarios (h)")
++    p.add_argument("--box", default="global",
++                   help="recorte lon1,lon2,lat1,lat2 ou 'global'")
++    p.add_argument("--prefix", default="IFS", help="prefixo dos intermediarios")
++    p.add_argument("--outdir", required=True, help="pasta de saida")
++    return p.parse_args()
++
++
++class Cropper:
++    """Recorta um campo lat-lon global na caixa pedida, com as linhas de sul para norte."""
++
++    def __init__(self, gid, box):
++        ni = eccodes.codes_get(gid, "Ni")
++        nj = eccodes.codes_get(gid, "Nj")
++        lat1 = eccodes.codes_get(gid, "latitudeOfFirstGridPointInDegrees")
++        lon1 = eccodes.codes_get(gid, "longitudeOfFirstGridPointInDegrees")
++        dlat = eccodes.codes_get(gid, "jDirectionIncrementInDegrees")
++        dlon = eccodes.codes_get(gid, "iDirectionIncrementInDegrees")
++        sign = 1.0 if eccodes.codes_get(gid, "jScansPositively") == 1 else -1.0
++        lats = lat1 + sign * dlat * np.arange(nj)
++        lons = (lon1 + dlon * np.arange(ni) + 180.0) % 360.0 - 180.0
++        if box == "global":
++            ii, jj = np.arange(ni), np.arange(nj)
++        else:
++            w, e, s, n = (float(x) for x in box.split(","))
++            if w < -180.0 or e > 360.0 or w >= e:
++                sys.exit(f"Recorte {box} invalido: use lon1 < lon2, em -180..180 ou 0..360")
++            # Caixa que cruza 180 graus vem em 0..360 (lon2 > 180): usa essa representacao
++            if e > 180.0:
++                lons = lons % 360.0
++            ii = np.where((lons >= w) & (lons <= e))[0]
++            ii = ii[np.argsort(lons[ii])]          # oeste -> leste, mesmo passando a borda da grade
++            jj = np.where((lats >= s) & (lats <= n))[0]
++            if ii.size < 2 or jj.size < 2 or not np.allclose(np.diff(lons[ii]), dlon, atol=1e-3 * dlon):
++                sys.exit(f"Recorte {box} vazio ou nao contiguo na grade do IFS")
++        self.jj = jj[np.argsort(lats[jj])]
++        self.ii = ii
++        self.shape = (nj, ni)
++        self.geo = (round(float(lats[self.jj[0]]), 6), round(float(lons[ii[0]]), 6),
++                    dlat, dlon, len(self.jj), len(ii))
++
++    def __call__(self, values):
++        return values.reshape(self.shape)[np.ix_(self.jj, self.ii)].astype(np.float32)
++
++
++def read_grib(path, box, crop):
++    """Le um GRIB do IFS -> {(shortName, nivel, passo): campo recortado}."""
++    out = {}
++    with open(path, "rb") as f:
++        while (gid := eccodes.codes_grib_new_from_file(f)) is not None:
++            try:
++                if crop is None:
++                    crop = Cropper(gid, box)
++                values = eccodes.codes_get_values(gid)
++                if eccodes.codes_get(gid, "bitmapPresent"):
++                    values = np.where(values == eccodes.codes_get(gid, "missingValue"), np.nan, values)
++                # Nivel so importa na pressao (hPa) e no solo (camada 1-4);
++                # o resto (2t e 2d em 2 m, 10u e 10v em 10 m, sp, msl...) fica 0
++                tol = eccodes.codes_get(gid, "typeOfLevel")
++                level = eccodes.codes_get(gid, "level", ktype=int)
++                if tol != "isobaricInhPa" and "soil" not in tol.lower():
++                    level = 0
++                key = (eccodes.codes_get(gid, "shortName"), level,
++                       eccodes.codes_get(gid, "endStep", ktype=int))
++                out[key] = crop(values)
++            finally:
++                eccodes.codes_release(gid)
++    return out, crop
++
++
++def get(data, short, level, step):
++    if (short, level, step) in data:
++        return data[(short, level, step)]
++    # Campos de superficie: aceita o unico nivel que houver (2 m, 10 m, ...)
++    if level == 0:
++        same = [k for k in data if k[0] == short and k[2] == step]
++        if len(same) == 1:
++            return data[same[0]]
++    names = sorted({f"{s}@{lev}/{st}h" for s, lev, st in data if st == step or s == short})
++    sys.exit(f"Campo {short} (nivel {level}, passo {step} h) ausente nos arquivos do IFS.\n"
++             f"Campos lidos (shortName@nivel/passo): {' '.join(names)}")
++
++
++def step_res(data, step):
++    """Monta, para um horario, o dicionario no formato que o icon2wps usa."""
++    res = {}
++    for short, var in PL_VARS.items():
++        scale = wps.G if short == "gh" else 1.0
++        recs = [((lev * 100.0, None), field * scale)
++                for (s, lev, st), field in data.items() if s == short and st == step]
++        if not recs:
++            sys.exit(f"Campo {short} nos niveis de pressao ausente no passo {step} h")
++        res[var] = recs
++    for short, var in SFC_VARS.items():
++        res[var] = [((None, None), get(data, short, 0, step))]
++
++    if step == 0:
++        sd = get(data, "sd", 0, 0)                  # m de equivalente em agua
++        rsn = data.get(("rsn", 0, 0))               # densidade da neve (kg m-3)
++        if rsn is None:
++            rsn = np.full_like(sd, 300.0)
++        sit = data.get(("sithick", 0, 0))           # espessura do gelo marinho (m)
++        res["W_SNOW"] = [((None, None), sd * 1000.0)]
++        res["H_SNOW"] = [((None, None), np.where(rsn > 0, sd * 1000.0 / rsn, 0.0))]
++        res["FR_ICE"] = [((None, None), (np.nan_to_num(sit) > 0).astype(np.float32)
++                          if sit is not None else np.zeros_like(sd))]
++        # vsw (m3 m-3) -> kg m-2 por camada, que e o que o icon2wps espera do W_SO
++        res["W_SO"] = [((top, bot), get(data, "vsw", k, 0) * 1000.0 * (bot - top))
++                       for k, (top, bot) in SOIL_LAYERS.items()]
++        res["T_SO"] = [((0.5 * (top + bot), None), get(data, "sot", k, 0))
++                       for k, (top, bot) in SOIL_LAYERS.items()]
++    return res
++
++
++def main():
++    args = parse_args()
++    wps.MAP_SOURCE = "ECMWF IFS"
++    run = dt.datetime.strptime(args.run, "%Y%m%d%H")
++    os.makedirs(args.outdir, exist_ok=True)
++
++    # Os arquivos de cada horario sao lidos so na vez dele (no 0.1 deg cada
++    # campo recortado ocupa alguns MB)
++    hours = range(0, args.fcst + 1, args.step)
++    paths = [os.path.join(args.indir, f"ifs_{k}.grib2") for k in ("sfc0", "sol")]
++    paths += [os.path.join(args.indir, f"ifs_{k}.{h:03d}.grib2") for h in hours for k in ("pl", "sfc")]
++    missing = [p for p in paths if not os.path.isfile(p)]
++    if missing:
++        sys.exit("Arquivos do IFS ausentes:\n  " + "\n  ".join(missing))
++
++    fixed, crop = {}, None
++    for name in ("sfc0", "sol"):
++        part, crop = read_grib(os.path.join(args.indir, f"ifs_{name}.grib2"), args.box, crop)
++        fixed.update(part)
++    geo = crop.geo
++    ti = {"HSURF": get(fixed, "z", 0, 0) / wps.G,
++          "LANDSEA": (np.nan_to_num(get(fixed, "lsm", 0, 0)) >= 0.5).astype(np.float32)}
++
++    for hour in hours:
++        valid = run + dt.timedelta(hours=hour)
++        hdate = f"{valid:%Y-%m-%d_%H}:00:00"
++        data = dict(fixed)
++        for name in ("pl", "sfc"):
++            part, crop = read_grib(os.path.join(args.indir, f"ifs_{name}.{hour:03d}.grib2"), args.box, crop)
++            data.update(part)
++        res = step_res(data, hour)
++        fields, nlev = wps.pressure_fields(res)
++        fields += wps.surface_fields(res, ti, initial=(hour == 0))
++
++        out = os.path.join(args.outdir, f"{args.prefix}:{valid:%Y-%m-%d_%H}")
++        with open(out, "wb") as f:
++            for name, units, desc, xlvl, field in fields:
++                wps.write_field(f, hdate, geo, name, units, desc, xlvl, field)
++        print(f"   -> {out} ({len(fields)} campos, {nlev} niveis de pressao, "
++              f"grade {geo[5]}x{geo[4]})", flush=True)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/make_degrib_ICON.bash b/scripts/make_degrib_ICON.bash
+new file mode 100755
+index 0000000..0646ea0
+--- /dev/null
++++ b/scripts/make_degrib_ICON.bash
+@@ -0,0 +1,161 @@
++#!/bin/bash
++umask 022
++#-----------------------------------------------------------------------------#
++# !SCRIPT: make_degrib_ICON                                       [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Faz, para o ICON, o papel do ungrib: converte os GRIB2 baixados por
++#     get_icon_dwd.bash em arquivos intermediarios do WPS (ICON:YYYY-MM-DD_HH)
++#     em ${DATAOUT}/LABELI/Pre, lidos pelo init_atmosphere (config_met_prefix
++#     = 'ICON'). Nao usa ungrib.exe nem Vtable.
++#
++#     icon2wps.py: bunzip2 + remap CDO (pesos do DWD) para lat-lon 0.125 grau,
++#     recorte (ICON_BOX; "auto" = caixa da malha regional), troca de nomes e
++#     unidades e escrita do intermediario. Roda no no de login (como o ungrib
++#     do GFS no upstream), com ICON_NPROC processos do cdo em paralelo.
++#
++# !CALLING SEQUENCE:
++#     ./make_degrib_ICON.bash ICON RES_MESH LABELI FCST   (chamado pelo 2.pre_processing.bash)
++#-----------------------------------------------------------------------------#
++
++if [ $# -ne 4 ]
++then
++   echo ""
++   echo "Instructions: execute the command below"
++   echo ""
++   echo "${0} EXP RES_MESH LABELI FCST"
++   echo ""
++   echo "EXP         :: ICON"
++   echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
++   echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
++   echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
++   echo ""
++   echo "Example of a 24-hour forecast (download first with ./get_icon_dwd.bash LABELI FCST):"
++   echo "${0} ICON 655362 $(date -u +%Y%m%d)00 24"
++   echo ""
++   exit 1
++fi
++
++# Set environment variables exports:
++echo ""
++echo -e "\033[1;32m==>\033[0m Moduling environment for MONAN model...\n"
++. setenv.bash
++
++echo ""
++echo "---- Make Degrib ${1} ----"
++echo ""
++
++# Standart directories variables:---------------------------------------
++DIRHOMES=${DIR_SCRIPTS}/scripts_CD-CT;  mkdir -p ${DIRHOMES}
++DIRHOMED=${DIR_DADOS}/scripts_CD-CT;    mkdir -p ${DIRHOMED}
++SCRIPTS=${DIRHOMES}/scripts;            mkdir -p ${SCRIPTS}
++DATAIN=${DIRHOMED}/datain;              mkdir -p ${DATAIN}
++DATAOUT=${DIRHOMED}/dataout;            mkdir -p ${DATAOUT}
++SOURCES=${DIRHOMES}/sources;            mkdir -p ${SOURCES}
++EXECS=${DIRHOMED}/execs;                mkdir -p ${EXECS}
++#----------------------------------------------------------------------
++
++
++# Input variables:--------------------------------------
++EXP=${1};         #EXP=ICON
++RES=${2};         #RES=1024002
++YYYYMMDDHHi=${3}; #YYYYMMDDHHi=2026110500
++FCST=${4};        #FCST=24
++#-------------------------------------------------------
++
++# Local variables--------------------------------------
++start_date=${YYYYMMDDHHi:0:4}-${YYYYMMDDHHi:4:2}-${YYYYMMDDHHi:6:2}_${YYYYMMDDHHi:8:2}:00:00
++export DIRRUN=${DIRHOMED}/run.${YYYYMMDDHHi}; rm -fr ${DIRRUN}; mkdir -p ${DIRRUN}
++BNDDIR=${DATAIN}/ICON/${YYYYMMDDHHi}
++ICONCDO=${DATAIN}/fixed/icon_cdo
++HHLDIR=${DATAIN}/fixed/icon_hhl
++VCOORD=${ICON_VCOORD:-model}
++NPROC=${ICON_NPROC:-8}
++
++# Python com numpy + eccodes (ICON_PYTHON ou ambiente conda; ver setenv.bash)
++PYTHON=$(find_python) || exit 1
++# cdo: ICON_CDO; senao o do mesmo ambiente do Python (conda); senao o do PATH. Com caminho completo, o
++# icon2wps.py roda o cdo sem o LD_LIBRARY_PATH do modelo (evita conflito com as bibliotecas do compilador).
++if [ -n "${ICON_CDO}" ]
++then
++   CDO=${ICON_CDO}
++elif [ -x "$(dirname ${PYTHON})/cdo" ]
++then
++   CDO=$(dirname ${PYTHON})/cdo
++else
++   CDO=$(command -v cdo)
++fi
++if [ -z "${CDO}" ]
++then
++   echo -e "${RED}==>${NC} cdo not found: install it in the Python env (conda install -c conda-forge cdo) or set ICON_CDO."
++   exit 1
++fi
++echo -e "${GREEN}==>${NC} Python: ${PYTHON}\n${GREEN}==>${NC} cdo:    ${CDO}\n"
++#-------------------------------------------------------
++mkdir -p ${DATAOUT}/${YYYYMMDDHHi}/Pre/logs
++
++# O ICON e baixado antes, com ./get_icon_dwd.bash ${YYYYMMDDHHi} ${FCST}
++files_needed=("${SCRIPTS}/icon2wps.py" "${ICONCDO}/target_grid.txt" "${ICONCDO}/weights.nc" "${BNDDIR}/icon_global_icosahedral_time-invariant_${YYYYMMDDHHi}_HSURF.grib2.bz2")
++if [[ ${VCOORD} == "model" ]]; then files_needed+=("${BNDDIR}/model_levels.txt"); fi
++if [[ ${MODERUN} == "R" && ${ICON_BOX} == "auto" ]]; then files_needed+=("${SCRIPTS}/mesh_box.py" "${DATAIN}/fixed/x1.${RES}.static.nc"); fi
++for file in "${files_needed[@]}"
++do
++  if [ ! -s "${file}" ]
++  then
++    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
++    echo -e  "${RED}==>${NC} [${0}] At least the file ${file} was not found. \n"
++    echo -e  "${RED}==>${NC} Run first: ./get_icon_dwd.bash ${YYYYMMDDHHi} ${FCST} \n"
++    exit 1
++  fi
++done
++
++if [[ $MODERUN == "R" ]]; then
++   echo -e "Converting ICON data for Regional (limited-area) mode – initial and lateral boundary conditions.\n"
++   fcst=${FCST}
++elif [[ ${MODERUN} == "G" ]]; then
++   echo -e "Converting ICON data for Global mode – only initial conditions.\n"
++   echo -e "${YELLOW}==>${NC} Global ICON at 0.125 deg: the intermediate file has several GB and the conversion needs ~10+ GB of RAM.\n"
++   fcst=0
++else
++   echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
++   echo -e  "${RED}==>${NC} Make degrib phase fails during degrib! Please select MODERUN=R or G so that degrib can be done appropriately.\n"
++   echo -e  "${RED}==>${NC} Exiting script. \n"
++   exit 1
++fi
++box=$(grib_box ${ICON_BOX} ${PYTHON} ${DATAIN}/fixed/x1.${RES}.static.nc) || exit 1
++echo -e "${GREEN}==>${NC} ICON lat-lon box (lon1,lon2,lat1,lat2): ${box}\n"
++
++# CDO remap + conversao para intermediarios do WPS (faz o papel do ungrib)
++cd ${DIRRUN}
++time ${PYTHON} ${SCRIPTS}/icon2wps.py --indir ${BNDDIR} --run ${YYYYMMDDHHi} \
++   --fcst ${fcst} --step $((LBCINT / 3600)) \
++   --grid ${ICONCDO}/target_grid.txt --weights ${ICONCDO}/weights.nc --box="${box}" \
++   --vcoord ${VCOORD} --hhl-dir ${HHLDIR} \
++   --prefix ${EXP} --cdo ${CDO} --nproc ${NPROC} --outdir ${DIRRUN} \
++   2>&1 | tee ${DATAOUT}/${YYYYMMDDHHi}/Pre/logs/icon2wps.${start_date}.log
++
++if [ ${PIPESTATUS[0]} -ne 0 ]
++then
++   echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
++   echo -e  "${RED}==>${NC} icon2wps.py failed! Check ${DATAOUT}/${YYYYMMDDHHi}/Pre/logs/icon2wps.${start_date}.log \n"
++   exit 1
++fi
++
++mv ${DIRRUN}/${EXP}\:* ${DATAOUT}/${YYYYMMDDHHi}/Pre
++
++files_ungrib=("${EXP}:${start_date:0:13}")
++for file in "${files_ungrib[@]}"
++do
++  if [ ! -s ${DATAOUT}/${YYYYMMDDHHi}/Pre/${file} ]
++  then
++    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
++    echo -e  "${RED}==>${NC} Degrib fails! At least the file ${file} was not generated at ${DATAOUT}/${YYYYMMDDHHi}/Pre. \n"
++    echo -e  "${RED}==>${NC} Check logs at ${DATAOUT}/${YYYYMMDDHHi}/Pre/logs/icon2wps.* .\n"
++    echo -e  "${RED}==>${NC} Exiting script. \n"
++    exit 1
++  fi
++done
++
++chmod -R 755 ${DATAOUT}/${YYYYMMDDHHi}/Pre/*
++cd ${SCRIPTS}
++rm -fr ${DIRRUN}
+diff --git a/scripts/make_degrib_IFS.bash b/scripts/make_degrib_IFS.bash
+new file mode 100755
+index 0000000..0ce47b0
+--- /dev/null
++++ b/scripts/make_degrib_IFS.bash
+@@ -0,0 +1,134 @@
++#!/bin/bash
++umask 022
++#-----------------------------------------------------------------------------#
++# !SCRIPT: make_degrib_IFS                                        [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Faz, para o IFS, o papel do ungrib: converte os GRIB2 baixados por
++#     get_ifs_ecmwf.bash em arquivos intermediarios do WPS (IFS:YYYY-MM-DD_HH)
++#     em ${DATAOUT}/LABELI/Pre, lidos pelo init_atmosphere (config_met_prefix
++#     = 'IFS'). Nao usa ungrib.exe nem Vtable, nem cdo (o IFS ja vem em
++#     lat-lon: so recorta, com IFS_BOX; "auto" = caixa da malha regional).
++#
++# !CALLING SEQUENCE:
++#     ./make_degrib_IFS.bash IFS RES_MESH LABELI FCST   (chamado pelo 2.pre_processing.bash)
++#-----------------------------------------------------------------------------#
++
++if [ $# -ne 4 ]
++then
++   echo ""
++   echo "Instructions: execute the command below"
++   echo ""
++   echo "${0} EXP RES_MESH LABELI FCST"
++   echo ""
++   echo "EXP         :: IFS"
++   echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
++   echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
++   echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
++   echo ""
++   echo "Example of a 24-hour forecast (download first with ./get_ifs_ecmwf.bash LABELI FCST):"
++   echo "${0} IFS 655362 $(date -u +%Y%m%d)00 24"
++   echo ""
++   exit 1
++fi
++
++# Set environment variables exports:
++echo ""
++echo -e "\033[1;32m==>\033[0m Moduling environment for MONAN model...\n"
++. setenv.bash
++
++echo ""
++echo "---- Make Degrib ${1} ----"
++echo ""
++
++# Standart directories variables:---------------------------------------
++DIRHOMES=${DIR_SCRIPTS}/scripts_CD-CT;  mkdir -p ${DIRHOMES}
++DIRHOMED=${DIR_DADOS}/scripts_CD-CT;    mkdir -p ${DIRHOMED}
++SCRIPTS=${DIRHOMES}/scripts;            mkdir -p ${SCRIPTS}
++DATAIN=${DIRHOMED}/datain;              mkdir -p ${DATAIN}
++DATAOUT=${DIRHOMED}/dataout;            mkdir -p ${DATAOUT}
++SOURCES=${DIRHOMES}/sources;            mkdir -p ${SOURCES}
++EXECS=${DIRHOMED}/execs;                mkdir -p ${EXECS}
++#----------------------------------------------------------------------
++
++
++# Input variables:--------------------------------------
++EXP=${1};         #EXP=IFS
++RES=${2};         #RES=1024002
++YYYYMMDDHHi=${3}; #YYYYMMDDHHi=2026110500
++FCST=${4};        #FCST=24
++#-------------------------------------------------------
++
++# Local variables--------------------------------------
++start_date=${YYYYMMDDHHi:0:4}-${YYYYMMDDHHi:4:2}-${YYYYMMDDHHi:6:2}_${YYYYMMDDHHi:8:2}:00:00
++export DIRRUN=${DIRHOMED}/run.${YYYYMMDDHHi}; rm -fr ${DIRRUN}; mkdir -p ${DIRRUN}
++BNDDIR=${DATAIN}/IFS/${YYYYMMDDHHi}
++
++# Python com numpy + eccodes (ICON_PYTHON ou ambiente conda; ver setenv.bash)
++PYTHON=$(find_python) || exit 1
++echo -e "${GREEN}==>${NC} Python: ${PYTHON}\n"
++#-------------------------------------------------------
++mkdir -p ${DATAOUT}/${YYYYMMDDHHi}/Pre/logs
++
++# O IFS e baixado antes, com ./get_ifs_ecmwf.bash ${YYYYMMDDHHi} ${FCST}
++# (o ifs2wps.py usa as conversoes e a escrita do icon2wps.py)
++files_needed=("${SCRIPTS}/ifs2wps.py" "${SCRIPTS}/icon2wps.py" "${BNDDIR}/ifs_sfc0.grib2" "${BNDDIR}/ifs_sol.grib2" "${BNDDIR}/ifs_pl.000.grib2" "${BNDDIR}/ifs_sfc.000.grib2")
++if [[ ${MODERUN} == "R" && ${IFS_BOX} == "auto" ]]; then files_needed+=("${SCRIPTS}/mesh_box.py" "${DATAIN}/fixed/x1.${RES}.static.nc"); fi
++for file in "${files_needed[@]}"
++do
++  if [ ! -s "${file}" ]
++  then
++    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
++    echo -e  "${RED}==>${NC} [${0}] At least the file ${file} was not found. \n"
++    echo -e  "${RED}==>${NC} Run first: ./get_ifs_ecmwf.bash ${YYYYMMDDHHi} ${FCST} \n"
++    exit 1
++  fi
++done
++
++if [[ $MODERUN == "R" ]]; then
++   echo -e "Converting IFS data for Regional (limited-area) mode – initial and lateral boundary conditions.\n"
++   fcst=${FCST}
++elif [[ ${MODERUN} == "G" ]]; then
++   echo -e "Converting IFS data for Global mode – only initial conditions.\n"
++   fcst=0
++else
++   echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
++   echo -e  "${RED}==>${NC} Make degrib phase fails during degrib! Please select MODERUN=R or G so that degrib can be done appropriately.\n"
++   echo -e  "${RED}==>${NC} Exiting script. \n"
++   exit 1
++fi
++box=$(grib_box ${IFS_BOX} ${PYTHON} ${DATAIN}/fixed/x1.${RES}.static.nc) || exit 1
++echo -e "${GREEN}==>${NC} IFS lat-lon box (lon1,lon2,lat1,lat2): ${box}\n"
++
++# Recorte + conversao para intermediarios do WPS (faz o papel do ungrib)
++cd ${DIRRUN}
++time ${PYTHON} ${SCRIPTS}/ifs2wps.py --indir ${BNDDIR} --run ${YYYYMMDDHHi} \
++   --fcst ${fcst} --step $((LBCINT / 3600)) --box="${box}" \
++   --prefix ${EXP} --outdir ${DIRRUN} \
++   2>&1 | tee ${DATAOUT}/${YYYYMMDDHHi}/Pre/logs/ifs2wps.${start_date}.log
++
++if [ ${PIPESTATUS[0]} -ne 0 ]
++then
++   echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
++   echo -e  "${RED}==>${NC} ifs2wps.py failed! Check ${DATAOUT}/${YYYYMMDDHHi}/Pre/logs/ifs2wps.${start_date}.log \n"
++   exit 1
++fi
++
++mv ${DIRRUN}/${EXP}\:* ${DATAOUT}/${YYYYMMDDHHi}/Pre
++
++files_ungrib=("${EXP}:${start_date:0:13}")
++for file in "${files_ungrib[@]}"
++do
++  if [ ! -s ${DATAOUT}/${YYYYMMDDHHi}/Pre/${file} ]
++  then
++    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
++    echo -e  "${RED}==>${NC} Degrib fails! At least the file ${file} was not generated at ${DATAOUT}/${YYYYMMDDHHi}/Pre. \n"
++    echo -e  "${RED}==>${NC} Check logs at ${DATAOUT}/${YYYYMMDDHHi}/Pre/logs/ifs2wps.* .\n"
++    echo -e  "${RED}==>${NC} Exiting script. \n"
++    exit 1
++  fi
++done
++
++chmod -R 755 ${DATAOUT}/${YYYYMMDDHHi}/Pre/*
++cd ${SCRIPTS}
++rm -fr ${DIRRUN}
+diff --git a/scripts/make_initatmos.bash b/scripts/make_initatmos.bash
+index c04e1d9..2ac8b70 100755
+--- a/scripts/make_initatmos.bash
++++ b/scripts/make_initatmos.bash
+@@ -8,7 +8,7 @@ then
+    echo ""
+    echo "${0} EXP RES_MESH LABELI FCST"
+    echo ""
+-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
++   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
+    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
+    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
+    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
+@@ -119,6 +119,10 @@ fi
+ sed -e "s,#LABELI#,${start_date},g;s,#GEODAT#,${GEODATA},g;s,#RES#,${RES},g;s,#EXP#,${EXP},g;s,#BLEND_BDY_TERRAIN#,${BLEND_BDY_TERRAIN},g" \
+     ${SCRIPTS}/namelists/namelist.init_atmosphere.TEMPLATE > ${DIRRUN}/namelist.init_atmosphere
+ 
++# [ICON/IFS] Grade vertical opcional (NVERTLEV/ZETA_LEVELS no setenv.bash) e config_nfglevels do ICON
++set_vertical_grid ${DIRRUN}/namelist.init_atmosphere ${DIRRUN} || exit 1
++set_fg_levels ${DIRRUN}/namelist.init_atmosphere || exit 1
++
+ sed -e "s,#RES#,${RES},g" \
+     ${SCRIPTS}/namelists/streams.init_atmosphere.TEMPLATE > ${DIRRUN}/streams.init_atmosphere
+ 
+diff --git a/scripts/make_lbcs.bash b/scripts/make_lbcs.bash
+index 0ebb8e5..bfd1937 100755
+--- a/scripts/make_lbcs.bash
++++ b/scripts/make_lbcs.bash
+@@ -7,7 +7,7 @@ then
+    echo ""
+    echo "${0} EXP RES_MESH LABELI FCST"
+    echo ""
+-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
++   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
+    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
+    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
+    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
+@@ -103,6 +103,10 @@ done
+ sed -e "s,#LABELI#,${start_date},g;s,#LABELF#,${final_date},g;s,#GEODAT#,${GEODATA},g;s,#LBCINT#,${LBCINT},g;s,#RES#,${RES},g;s,#EXP#,${EXP},g" \
+ 	 ${SCRIPTS}/namelists/namelist.init_atmosphere.LBCS > ${DIRRUN}/namelist.init_atmosphere
+ 
++# [ICON/IFS] Mesmo numero de niveis do init.nc (a grade vem dele) e config_nfglevels do ICON
++set_vertical_grid ${DIRRUN}/namelist.init_atmosphere ${DIRRUN} lbc || exit 1
++set_fg_levels ${DIRRUN}/namelist.init_atmosphere || exit 1
++
+ sed -e "s,#RES#,${RES},g;s,#LBCINT#,${LBCINT},g" \
+     ${SCRIPTS}/namelists/streams.init_atmosphere.LBCS > ${DIRRUN}/streams.init_atmosphere
+ 
+diff --git a/scripts/make_static.bash b/scripts/make_static.bash
+index 903c561..580d4db 100755
+--- a/scripts/make_static.bash
++++ b/scripts/make_static.bash
+@@ -9,7 +9,7 @@ then
+    echo ""
+    echo "${0} EXP RES_MESH LABELI FCST"
+    echo ""
+-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
++   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
+    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
+    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
+    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
+diff --git a/scripts/make_template.bash b/scripts/make_template.bash
+index 428770c..bdffdda 100755
+--- a/scripts/make_template.bash
++++ b/scripts/make_template.bash
+@@ -23,7 +23,7 @@ then
+    echo ""
+    echo "${0} EXP RES_MESH LABELI FCST"
+    echo ""
+-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
++   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
+    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
+    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
+    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
+diff --git a/scripts/mesh_box.py b/scripts/mesh_box.py
+new file mode 100755
+index 0000000..108fb89
+--- /dev/null
++++ b/scripts/mesh_box.py
+@@ -0,0 +1,95 @@
++#!/usr/bin/env python3
++#-----------------------------------------------------------------------------#
++# !SCRIPT: mesh_box.py                                            [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Caixa lat-lon que cobre uma malha MPAS/MONAN regional, com margem, no
++#     formato "lon1,lon2,lat1,lat2" usado pelo icon2wps.py/ifs2wps.py (e pelo
++#     sellonlatbox do CDO). E o recorte "auto" (ICON_BOX/IFS_BOX=auto).
++#
++#     A margem existe porque o init_atmosphere interpola dos pontos lat-lon
++#     vizinhos de cada celula: a caixa precisa ir um pouco alem da malha.
++#
++#     Le latCell/lonCell (radianos) de qualquer arquivo da malha
++#     (x1.RES.static.nc, grid.nc, init.nc), tentando nesta ordem: netCDF4,
++#     xarray, scipy (so netCDF classico/64-bit) e, por ultimo, o ncdump.
++#
++#     Longitudes saem em -180..180 ou, se a malha cruza o meridiano de 180
++#     graus, em 0..360. Se a malha ocupar mais de 300 graus de longitude ou
++#     chegar a um polo, imprime "global".
++#
++# !CALLING SEQUENCE:
++#     mesh_box.py [--margin 5] x1.RES.static.nc
++#
++#-----------------------------------------------------------------------------#
++
++import argparse
++import re
++import shutil
++import subprocess
++import sys
++
++import numpy as np
++
++
++def read_latlon(path):
++    """latCell, lonCell em graus."""
++    errors = []
++    try:
++        import netCDF4
++        with netCDF4.Dataset(path) as nc:
++            return (np.degrees(np.asarray(nc.variables["latCell"][:], dtype=np.float64)),
++                    np.degrees(np.asarray(nc.variables["lonCell"][:], dtype=np.float64)))
++    except Exception as err:  # noqa: BLE001 (tenta o proximo leitor)
++        errors.append(f"netCDF4: {err}")
++    try:
++        import xarray
++        with xarray.open_dataset(path, decode_times=False) as ds:
++            return np.degrees(ds["latCell"].values), np.degrees(ds["lonCell"].values)
++    except Exception as err:  # noqa: BLE001
++        errors.append(f"xarray: {err}")
++    try:
++        from scipy.io import netcdf_file
++        with netcdf_file(path, "r", mmap=False) as nc:
++            return (np.degrees(nc.variables["latCell"][:].astype(np.float64)),
++                    np.degrees(nc.variables["lonCell"][:].astype(np.float64)))
++    except Exception as err:  # noqa: BLE001
++        errors.append(f"scipy: {err}")
++    if shutil.which("ncdump"):
++        out = {}
++        for var in ("latCell", "lonCell"):
++            text = subprocess.run(["ncdump", "-v", var, path], capture_output=True, text=True, check=True).stdout
++            body = text.split(f"{var} =", 1)[1].split(";", 1)[0]
++            out[var] = np.degrees(np.array(re.findall(r"[-+0-9.eE]+", body), dtype=np.float64))
++        return out["latCell"], out["lonCell"]
++    errors.append("ncdump: not found in PATH")
++    sys.exit(f"mesh_box.py: could not read latCell/lonCell from {path}:\n  " + "\n  ".join(errors))
++
++
++def main():
++    p = argparse.ArgumentParser(description="Caixa lat-lon de uma malha MPAS regional")
++    p.add_argument("mesh", help="arquivo da malha com latCell/lonCell (ex.: x1.RES.static.nc)")
++    p.add_argument("--margin", type=float, default=5.0, help="margem em graus (padrao 5)")
++    a = p.parse_args()
++
++    lat, lon = read_latlon(a.mesh)
++    s, n = lat.min() - a.margin, lat.max() + a.margin
++    # Escolhe a representacao de longitude (-180..180 ou 0..360) em que a malha fica mais estreita e a
++    # caixa, com a margem, nao sai dos limites dessa representacao
++    best = None
++    for lons, lo, hi in (((lon + 180.0) % 360.0 - 180.0, -180.0, 180.0), (lon % 360.0, 0.0, 360.0)):
++        w, e = lons.min() - a.margin, lons.max() + a.margin
++        if w >= lo and e <= hi and (best is None or e - w < best[1] - best[0]):
++            best = (w, e)
++    if best is None or best[1] - best[0] >= 300.0 or s <= -89.0 or n >= 89.0:
++        print("global")
++        return
++    w, e = best
++    width = e - w - 2 * a.margin
++    print(f"{np.floor(w):.0f},{np.ceil(e):.0f},{np.floor(max(s, -90.0)):.0f},{np.ceil(min(n, 90.0)):.0f}")
++    print(f"mesh_box.py: {lat.size} cells; lat {lat.min():.2f}..{lat.max():.2f}, "
++          f"lon width {width:.2f} deg; margin {a.margin} deg", file=sys.stderr)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/namelists/zeta_levels.L75.txt b/scripts/namelists/zeta_levels.L75.txt
+new file mode 100644
+index 0000000..093a010
+--- /dev/null
++++ b/scripts/namelists/zeta_levels.L75.txt
+@@ -0,0 +1,76 @@
++0.00
++20.00
++42.00
++66.20
++92.82
++122.10
++154.31
++189.74
++228.72
++271.59
++318.75
++370.62
++427.69
++490.45
++559.50
++635.45
++718.99
++810.89
++911.98
++1023.18
++1145.50
++1280.05
++1428.05
++1590.86
++1769.95
++1966.94
++2183.64
++2422.00
++2684.20
++2972.62
++3289.88
++3638.87
++4022.76
++4445.03
++4909.53
++5389.53
++5869.53
++6349.53
++6829.53
++7309.53
++7789.53
++8269.53
++8749.53
++9229.53
++9709.53
++10189.53
++10669.53
++11149.53
++11629.53
++12121.05
++12624.36
++13139.74
++13667.48
++14207.88
++14761.25
++15327.89
++15908.13
++16502.29
++17110.70
++17733.70
++18371.65
++19024.91
++19693.83
++20378.81
++21080.21
++21798.45
++22533.91
++23287.01
++24058.18
++24847.86
++25656.47
++26484.49
++27332.36
++28200.58
++29089.63
++30000.00
+diff --git a/scripts/run_subset.bash b/scripts/run_subset.bash
+index 59ad3fd..3ce3aea 100755
+--- a/scripts/run_subset.bash
++++ b/scripts/run_subset.bash
+@@ -24,7 +24,7 @@ then
+    echo ""
+    echo "${0} EXP RES_MESH LABELI FCST SUBSET_CODE"
+    echo ""
+-   echo "EXP           :: Initial or lateral boundary condition dataset (GFS or ERA)"
++   echo "EXP           :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
+    echo "RES_MESH      :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 1024002 for the ~24 km mesh)"
+    echo "LABELI        :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
+    echo "FCST          :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
+diff --git a/scripts/setenv.bash b/scripts/setenv.bash
+index 9ed282c..9d5484c 100755
+--- a/scripts/setenv.bash
++++ b/scripts/setenv.bash
+@@ -5,6 +5,43 @@ umask 022
+ export MODERUN=G     # R=Regional simulation and G=Global simulation.
+ export LBCINT=10800  # Interval (seconds) for updating lateral boundary conditions (when regional mode).
+ 
++# ==== [ICON/IFS] CI/CC do ICON (DWD) e do IFS (ECMWF) ======================================================
++# Usados com EXP=ICON ou EXP=IFS (ver docs/ no repositorio MONAN-ICON-IFS). Todos podem ser trocados na
++# linha de comando sem editar este arquivo, ex.:  ICON_VCOORD=pressure ./2.pre_processing.bash ICON ...
++#
++# Python com numpy + eccodes (converte os GRIB2). Vazio = procura sozinho (find_python, abaixo) nos ambientes
++# conda do usuario e no python3 do sistema. Para fixar um: export ICON_PYTHON=/caminho/env/bin/python
++export ICON_PYTHON=${ICON_PYTHON:-}
++# cdo (so o ICON usa). Vazio = o cdo do mesmo ambiente do ICON_PYTHON; senao o do PATH.
++export ICON_CDO=${ICON_CDO:-}
++# ICON: niveis verticais de entrada: model (niveis nativos do ICON, recomendado) ou pressure (18 niveis)
++export ICON_VCOORD=${ICON_VCOORD:-model}
++# ICON (niveis do modelo): todos os niveis nativos ate ICON_ZFULL m acima do solo; acima, 1 a cada ICON_THIN;
++# so UM nivel acima do topo do MONAN (ICON_ZTOP; vazio = config_ztop do namelist.init_atmosphere.TEMPLATE)
++export ICON_ZFULL=${ICON_ZFULL:-16000}
++export ICON_THIN=${ICON_THIN:-2}
++export ICON_ZTOP=${ICON_ZTOP:-}
++export ICON_NPROC=${ICON_NPROC:-8}      # downloads/conversoes em paralelo (no de login: nao exagere)
++# IFS: resolucao (0p1, 0p25 ou 0p4-beta) e fonte (ecmwf = ultimos ~3 dias; aws = arquivo desde 2023)
++export IFS_RESOL=${IFS_RESOL:-0p1}
++export IFS_SOURCE=${IFS_SOURCE:-ecmwf}
++export IFS_NPROC=${IFS_NPROC:-8}
++# Recorte lat-lon dos dados no modo regional: "lon1,lon2,lat1,lat2" (graus) ou "auto" = caixa da malha
++# regional (x1.RES.static.nc) + GRIB_BOX_MARGIN graus. No modo global o recorte e sempre "global".
++export ICON_BOX=${ICON_BOX:-auto}
++export IFS_BOX=${IFS_BOX:-${ICON_BOX}}
++export GRIB_BOX_MARGIN=${GRIB_BOX_MARGIN:-5}
++
++# ==== [ICON/IFS] Grade vertical do MONAN (opcional, vale para qualquer EXP) ===============================
++# NVERTLEV vazio = usa o config_nvertlevels dos namelists (55 no MONAN 2.0). Se mudar, o init.nc, as LBCs e
++# os nomes dos arquivos do modelo/pos passam a usar NVERTLEV.
++# ZETA_LEVELS vazio = grade padrao do MPAS (config_tc_vertical_grid). Com um nome de arquivo (em namelists/,
++# gerado por zeta_levels.py), usa config_specified_zeta_levels: NVERTLEV+1 alturas, a ultima = config_ztop.
++# ATENCAO: troque os dois juntos e rode de novo o 2.pre_processing.bash (init.nc e lbc.*.nc dependem disso).
++export NVERTLEV=${NVERTLEV:-}
++export ZETA_LEVELS=${ZETA_LEVELS:-}
++# ==========================================================================================================
++
+ # Choose your compiler here (only on Jaci; on Egeon the compiler is fixed to ‘gnu’):
+ export COMPILER=intel
+ #export COMPILER=gnu
+@@ -93,6 +130,135 @@ export YELLOW='\033[1;33m' # Yellow
+ 
+ # Functions: ======================================================================================================
+ 
++# [ICON/IFS] Python com numpy + eccodes: ICON_PYTHON se definido; senao o primeiro ambiente conda do usuario
++# (ou o python3 do sistema) que importe os dois. Imprime o caminho; retorna 1 se nao achar.
++find_python () {
++   local cand cands
++   if [ -n "${ICON_PYTHON}" ]
++   then
++      cands="${ICON_PYTHON}"
++   else
++      cands="$(ls -d ${HOME}/.conda/envs/*/bin/python ${HOME}/miniconda3/envs/*/bin/python \
++               ${HOME}/miniforge3/envs/*/bin/python ${HOME}/anaconda3/envs/*/bin/python \
++               ${HOME}/miniconda3/bin/python ${HOME}/miniforge3/bin/python ${HOME}/anaconda3/bin/python \
++               2>/dev/null) $(command -v python3)"
++   fi
++   for cand in ${cands}
++   do
++      [ -x "${cand}" ] || continue
++      if "${cand}" -c "import numpy, eccodes" > /dev/null 2>&1
++      then
++         echo "${cand}"
++         return 0
++      fi
++   done
++   echo -e "${RED}==>${NC} No Python with numpy + eccodes found (tried: ${cands})." >&2
++   echo -e "${RED}==>${NC} Create one (once):  conda create -n monan_grib -c conda-forge python numpy python-eccodes cdo" >&2
++   echo -e "${RED}==>${NC} or set ICON_PYTHON=<.../bin/python> in setenv.bash." >&2
++   return 1
++}
++
++# [ICON/IFS] Valor de uma variavel num namelist:  nml_get ARQUIVO VARIAVEL
++nml_get () {
++   sed -n -E "s/^[[:space:]]*${2}[[:space:]]*=[[:space:]]*'?([^'!]*)'?.*/\1/p" ${1} | head -1 | xargs
++}
++
++# [ICON/IFS] Troca uma variavel de um namelist ja gerado ou, se ela nao existir, acrescenta no grupo &GRUPO:
++#    nml_set ARQUIVO GRUPO VARIAVEL VALOR      (texto vai com aspas simples no VALOR, ex.: "'arquivo.txt'")
++nml_set () {
++   local file=${1} group=${2} var=${3} value=${4}
++   if grep -qE "^[[:space:]]*${var}[[:space:]]*=" ${file}
++   then
++      sed -i -E "s|^([[:space:]]*${var}[[:space:]]*=).*|\1 ${value}|" ${file}
++   elif grep -qE "^[[:space:]]*&${group}[[:space:]]*$" ${file}
++   then
++      awk -v g="&${group}" -v line="    ${var} = ${value}" '{print} $1 == g {print line}' ${file} > ${file}.tmp
++      mv ${file}.tmp ${file}
++   else
++      echo -e "${RED}==>${NC} nml_set: group &${group} not found in ${file}" >&2
++      return 1
++   fi
++}
++
++# [ICON/IFS] config_nfglevels precisa ser >= niveis atmosfericos do first guess + 1 (a superficie; o PMSL nao
++# conta). GFS (34+1), ERA5, IFS (14+1) e ICON em pressao (18+1) cabem nos 35 do namelist padrao; o ICON nos
++# niveis do modelo (~75) nao. Aumenta o valor do namelist gerado so quando precisa. Usa EXP, DATAIN e
++# YYYYMMDDHHi do script que chama.
++#    set_fg_levels ARQUIVO_NAMELIST
++set_fg_levels () {
++   local mlev=${DATAIN}/ICON/${YYYYMMDDHHi}/model_levels.txt need cur
++   if [[ ${EXP} == "ICON" && ${ICON_VCOORD} == "model" && -s ${mlev} ]]
++   then
++      need=$(( $(wc -w < ${mlev}) + 1 ))
++      cur=$(nml_get ${1} config_nfglevels)
++      if [ -z "${cur}" ] || [ ${cur} -lt ${need} ]
++      then
++         echo -e "${GREEN}==>${NC} config_nfglevels: ${cur:-unset} -> ${need} (ICON model levels + surface)"
++         nml_set ${1} dimensions config_nfglevels ${need} || return 1
++      fi
++   fi
++   return 0
++}
++
++# [ICON/IFS] Grade vertical opcional (NVERTLEV/ZETA_LEVELS do inicio deste arquivo) num namelist.init_atmosphere
++# ja gerado. Com ZETA_LEVELS, confere o arquivo e copia para DIRRUN.
++#    set_vertical_grid ARQUIVO_NAMELIST DIRRUN [lbc]   (lbc: so o numero de niveis; a grade vem do init.nc)
++set_vertical_grid () {
++   local nml=${1} dirrun=${2} mode=${3:-init} zfile nlev nlines nvalues ztop_file ztop_nml
++   if [ -n "${NVERTLEV}" ]
++   then
++      nml_set ${nml} dimensions config_nvertlevels ${NVERTLEV} || return 1
++   fi
++   nlev=$(nml_get ${nml} config_nvertlevels)
++   if [ -z "${ZETA_LEVELS}" ] || [ "${mode}" == "lbc" ]
++   then
++      echo -e "${GREEN}==>${NC} Vertical grid: ${nlev} levels${ZETA_LEVELS:+ (from x1.*.init.nc)}"
++      return 0
++   fi
++   zfile=${SCRIPTS}/namelists/${ZETA_LEVELS}
++   if [ ! -s ${zfile} ]
++   then
++      echo -e "${RED}==>${NC} Vertical levels file ${zfile} not found (ZETA_LEVELS in setenv.bash)." >&2
++      return 1
++   fi
++   # o init_atmosphere le NVERTLEV+1 valores (um por linha, crescentes, em metros); a ultima altura vira o topo
++   nlines=$(grep -cvE '^[[:space:]]*$' ${zfile})
++   nvalues=$(grep -cE '^[[:space:]]*[0-9]+(\.[0-9]*)?[[:space:]]*$' ${zfile})
++   if [ ${nlines} -ne $((nlev + 1)) ] || [ ${nvalues} -ne $((nlev + 1)) ]
++   then
++      echo -e "${RED}==>${NC} ${zfile} has ${nlines} lines / ${nvalues} values; expected config_nvertlevels+1 = $((nlev + 1))." >&2
++      echo -e "${RED}==>${NC} Set NVERTLEV in setenv.bash to the number of layers of ${ZETA_LEVELS}." >&2
++      return 1
++   fi
++   # A ultima altura do arquivo substitui o config_ztop no init_atmosphere. Os dois precisam ser iguais, porque
++   # os scripts do ICON escolhem os niveis de entrada a partir do config_ztop.
++   ztop_file=$(grep -vE '^[[:space:]]*$' ${zfile} | tail -1)
++   ztop_nml=$(nml_get ${nml} config_ztop)
++   if ! awk -v a=${ztop_file} -v b=${ztop_nml} 'BEGIN{exit (a+0 == b+0) ? 0 : 1}'
++   then
++      echo -e "${RED}==>${NC} Top of ${zfile} (${ztop_file} m) differs from config_ztop (${ztop_nml} m)." >&2
++      return 1
++   fi
++   cp -f ${zfile} ${dirrun}
++   nml_set ${nml} vertical_grid config_specified_zeta_levels "'${ZETA_LEVELS}'" || return 1
++   echo -e "${GREEN}==>${NC} Vertical grid: ${nlev} levels from ${ZETA_LEVELS} (top ${ztop_file} m)"
++}
++
++# [ICON/IFS] Recorte lat-lon dos dados (ICON_BOX/IFS_BOX): "global" no modo global; no regional, a caixa
++# pedida ou, com "auto", a da malha (x1.RES.static.nc) + GRIB_BOX_MARGIN graus (mesh_box.py).
++#    grib_box CAIXA PYTHON ARQUIVO_DA_MALHA
++grib_box () {
++   if [[ ${MODERUN} == "G" ]]
++   then
++      echo "global"
++   elif [[ ${1} == "auto" ]]
++   then
++      ${2} ${SCRIPTS:-.}/mesh_box.py --margin ${GRIB_BOX_MARGIN} ${3}
++   else
++      echo "${1}"
++   fi
++}
++
+ how_many_nodes () { 
+    nume=${1}   
+    deno=${2}
+diff --git a/scripts/wps_inventory.py b/scripts/wps_inventory.py
+new file mode 100755
+index 0000000..7f56b82
+--- /dev/null
++++ b/scripts/wps_inventory.py
+@@ -0,0 +1,108 @@
++#!/usr/bin/env python3
++#-----------------------------------------------------------------------------#
++# !SCRIPT: wps_inventory.py                                       [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Lista o conteudo de um arquivo intermediario do WPS (formato WPS = 5),
++#     como os gerados pelo ungrib (GFS:..., ERA:...) ou pelo icon2wps.py /
++#     ifs2wps.py (ICON:..., IFS:...): campo, nivel, unidade, grade e
++#     minimo/media/maximo. Serve para conferir a conversao antes de rodar o
++#     init_atmosphere e para comparar fontes (ex.: GFS x ICON).
++#
++#     So precisa de numpy.
++#
++# !CALLING SEQUENCE:
++#     wps_inventory.py ICON:2026-11-05_00 [--field TT] [--levels]
++#
++#        --field NOME : so esse campo
++#        --levels     : resumo dos niveis por campo, em vez de uma linha por registro
++#
++#     xlvl = pressao em Pa nos niveis isobaricos (GFS, ERA5, IFS, ICON_VCOORD=pressure)
++#            ou numero do nivel nos niveis do modelo do ICON (1 = topo); 200100 = superficie.
++#
++#-----------------------------------------------------------------------------#
++
++import argparse
++import struct
++import sys
++from collections import defaultdict
++
++import numpy as np
++
++
++def records(path):
++    """Registros Fortran sequenciais big-endian (marcador de 4 bytes antes e depois)."""
++    with open(path, "rb") as f:
++        while True:
++            head = f.read(4)
++            if not head:
++                return
++            (n,) = struct.unpack(">i", head)
++            payload = f.read(n)
++            tail = f.read(4)
++            if len(payload) != n or tail != head:
++                sys.exit(f"{path}: arquivo truncado ou fora do formato intermediario do WPS")
++            yield payload
++
++
++def fields(path):
++    rec = records(path)
++    for version in rec:
++        if struct.unpack(">i", version)[0] != 5:
++            sys.exit(f"{path}: versao do intermediario diferente de 5 (formato WPS)")
++        hdate, xfcst, source, field, units, desc, xlvl, nx, ny, iproj = struct.unpack(
++            ">24sf32s9s25s46sf3i", next(rec))
++        proj = next(rec)                       # projecao (lat-lon: SWCORNER, lat1, lon1, dlat, dlon, raio)
++        next(rec)                              # is_wind_grid_rel
++        slab = np.frombuffer(next(rec), dtype=">f4").reshape(ny, nx)
++        geo = ""
++        if iproj == 0:
++            _, lat1, lon1, dlat, dlon, _ = struct.unpack(">8s5f", proj[:28])
++            geo = f"lat {lat1:.3f}..{lat1 + (ny - 1) * dlat:.3f} lon {lon1:.3f}..{lon1 + (nx - 1) * dlon:.3f} d {dlat:.4f}"
++        yield {"date": hdate.decode().strip(), "source": source.decode().strip(),
++               "field": field.decode().strip(), "units": units.decode().strip(),
++               "xlvl": xlvl, "nx": nx, "ny": ny, "geo": geo, "data": slab}
++
++
++def level_name(xlvl):
++    """xlvl: pressao em Pa (niveis isobaricos) ou numero do nivel (niveis do modelo do ICON, 1 = topo)."""
++    if xlvl == 200100.0:
++        return "superficie"
++    if xlvl == 201300.0:
++        return "nivel do mar"
++    return f"xlvl {xlvl:.0f}"
++
++
++def main():
++    p = argparse.ArgumentParser(description="Inventario de um intermediario do WPS")
++    p.add_argument("file")
++    p.add_argument("--field", help="so este campo (ex.: TT, GHT, SM000010)")
++    p.add_argument("--levels", action="store_true", help="resumo por campo")
++    a = p.parse_args()
++
++    summary = defaultdict(list)
++    first = True
++    for rec in fields(a.file):
++        if first:
++            print(f"{a.file}: {rec['date']}  fonte '{rec['source']}'  grade {rec['nx']}x{rec['ny']}  {rec['geo']}")
++            first = False
++        if a.field and rec["field"] != a.field:
++            continue
++        d = rec["data"]
++        if a.levels:
++            summary[(rec["field"], rec["units"])].append(rec["xlvl"])
++            continue
++        nan = int(np.isnan(d).sum())
++        print(f"{rec['field']:9s} {level_name(rec['xlvl']):>14s} {rec['units']:10s} "
++              f"min {np.nanmin(d):12.4g} media {np.nanmean(d):12.4g} max {np.nanmax(d):12.4g}"
++              + (f"  NaN: {nan}" if nan else ""))
++    if a.levels:
++        for (name, units), lev in summary.items():
++            lev = sorted(lev)
++            print(f"{name:9s} {units:10s} {len(lev):3d} nivel(is): {level_name(lev[0])} ... {level_name(lev[-1])}")
++    if first:
++        sys.exit(f"{a.file}: nenhum campo encontrado")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/zeta_levels.py b/scripts/zeta_levels.py
+new file mode 100755
+index 0000000..2ddfd47
+--- /dev/null
++++ b/scripts/zeta_levels.py
+@@ -0,0 +1,103 @@
++#!/usr/bin/env python3
++#-----------------------------------------------------------------------------#
++# !SCRIPT: zeta_levels.py                                        [ICON/IFS]
++#
++# !DESCRIPTION:
++#     Gera o arquivo de alturas das interfaces das camadas (zeta, em metros)
++#     lido pelo init_atmosphere em config_specified_zeta_levels. O arquivo tem
++#     NLEV+1 linhas, um valor por linha, de 0 ate ZTOP (sem comentarios: o
++#     init_atmosphere conta as linhas).
++#
++#     Distribuicao em tres trechos:
++#        1. camada limite: dz cresce de --dzbot com razao --r1 ate --dzmid
++#        2. troposfera: dz constante = --dzmid ate --ztrans
++#        3. acima: dz cresce geometricamente com a razao r2 que fecha
++#           exatamente NLEV camadas em ZTOP (r2 calculada aqui)
++#
++#     Padrao (L75, ztop 30 km, 3 km convectivo, dt 12 s): dzbot 20 m
++#     (1o nivel de massa a 10 m), r1 1.10, dzmid 480 m, ztrans 12 km.
++#     Comparada com a grade TC do MPAS com 75 niveis: 25 camadas abaixo de
++#     2 km (TC: 19), dz nunca menor que ~215 m acima de 2 km (TC: 190 m;
++#     Courant vertical nao piora) e 10 niveis na camada de amortecimento
++#     acima de config_zd = 22 km.
++#
++#     Imprime a tabela de alturas e um resumo em stderr.
++#
++# !CALLING SEQUENCE:
++#     zeta_levels.py [--nlev 75] [--ztop 30000] [--dzbot 20] [--r1 1.10]
++#                    [--dzmid 480] [--ztrans 12000] > zeta_levels.L75.txt
++#
++#-----------------------------------------------------------------------------#
++
++import argparse
++import sys
++
++import numpy as np
++
++
++def upper_ratio(dzmid, nleft, height):
++    """Razao r2 tal que dzmid*(r2 + r2**2 + ... + r2**nleft) = height (bissecao)."""
++    def total(r):
++        return dzmid * nleft if abs(r - 1.0) < 1e-12 else dzmid * r * (r ** nleft - 1.0) / (r - 1.0)
++    lo, hi = 0.5, 2.0
++    if not total(lo) < height < total(hi):
++        return None
++    for _ in range(200):
++        mid = 0.5 * (lo + hi)
++        if total(mid) < height:
++            lo = mid
++        else:
++            hi = mid
++    return 0.5 * (lo + hi)
++
++
++def build(nlev, ztop, dzbot, r1, dzmid, ztrans):
++    z, dz = [0.0], dzbot
++    while dz < dzmid:                      # 1. camada limite
++        z.append(z[-1] + dz)
++        dz *= r1
++    while z[-1] + dzmid <= ztrans:         # 2. troposfera
++        z.append(z[-1] + dzmid)
++    nleft = nlev - (len(z) - 1)            # 3. ate o topo
++    if nleft < 1:
++        sys.exit(f"Camadas demais abaixo de {ztrans:.0f} m: diminua --ztrans ou aumente --dzmid/--r1")
++    r2 = upper_ratio(dzmid, nleft, ztop - z[-1])
++    if r2 is None:
++        sys.exit("Nao ha razao de estiramento que feche o topo: ajuste --dzmid/--ztrans")
++    for i in range(1, nleft + 1):
++        z.append(z[-1] + dzmid * r2 ** i)
++    z = np.array(z)
++    z[-1] = ztop
++    return z, r2
++
++
++def main():
++    p = argparse.ArgumentParser(description="Alturas das interfaces para config_specified_zeta_levels")
++    p.add_argument("--nlev", type=int, default=75, help="numero de camadas (config_nvertlevels)")
++    p.add_argument("--ztop", type=float, default=30000.0, help="topo do modelo (m)")
++    p.add_argument("--dzbot", type=float, default=20.0, help="espessura da 1a camada (m)")
++    p.add_argument("--r1", type=float, default=1.10, help="razao de estiramento na camada limite")
++    p.add_argument("--dzmid", type=float, default=480.0, help="espessura constante na troposfera (m)")
++    p.add_argument("--ztrans", type=float, default=12000.0, help="altura onde comeca o estiramento superior (m)")
++    a = p.parse_args()
++
++    zw, r2 = build(a.nlev, a.ztop, a.dzbot, a.r1, a.dzmid, a.ztrans)
++    dz = np.diff(zw)
++    zm = 0.5 * (zw[1:] + zw[:-1])
++
++    print("  k   z_interface(m)   z_massa(m)   dz(m)   razao", file=sys.stderr)
++    for k in range(a.nlev):
++        rat = dz[k] / dz[k - 1] if k > 0 else float("nan")
++        print(f"{k + 1:3d} {zw[k]:12.1f} {zm[k]:13.1f} {dz[k]:8.1f} {rat:7.3f}", file=sys.stderr)
++    print(f"{a.nlev + 1:3d} {zw[-1]:12.1f}", file=sys.stderr)
++    print(f"Resumo: {a.nlev} camadas; 1o nivel de massa {zm[0]:.1f} m; "
++          f"camadas abaixo de 1/2/3 km: {np.sum(zw[1:] <= 1000)}/{np.sum(zw[1:] <= 2000)}/{np.sum(zw[1:] <= 3000)}; "
++          f"razao maxima {np.max(dz[1:] / dz[:-1]):.3f}; r2 = {r2:.4f}; dz no topo {dz[-1]:.0f} m",
++          file=sys.stderr)
++
++    for v in zw:
++        print(f"{v:.2f}")
++
++
++if __name__ == "__main__":
++    main()

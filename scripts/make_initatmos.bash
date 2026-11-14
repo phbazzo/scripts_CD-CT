@@ -8,7 +8,7 @@ then
    echo ""
    echo "${0} EXP RES_MESH LABELI FCST"
    echo ""
-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
+   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
@@ -118,6 +118,10 @@ fi
 
 sed -e "s,#LABELI#,${start_date},g;s,#GEODAT#,${GEODATA},g;s,#RES#,${RES},g;s,#EXP#,${EXP},g;s,#BLEND_BDY_TERRAIN#,${BLEND_BDY_TERRAIN},g" \
     ${SCRIPTS}/namelists/namelist.init_atmosphere.TEMPLATE > ${DIRRUN}/namelist.init_atmosphere
+
+# [ICON/IFS] Grade vertical opcional (NVERTLEV/ZETA_LEVELS no setenv.bash) e config_nfglevels do ICON
+set_vertical_grid ${DIRRUN}/namelist.init_atmosphere ${DIRRUN} || exit 1
+set_fg_levels ${DIRRUN}/namelist.init_atmosphere || exit 1
 
 sed -e "s,#RES#,${RES},g" \
     ${SCRIPTS}/namelists/streams.init_atmosphere.TEMPLATE > ${DIRRUN}/streams.init_atmosphere

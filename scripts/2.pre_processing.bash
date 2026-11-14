@@ -11,7 +11,8 @@ trap 'echo -e "\n${RED}==>${NC} $(basename "$0") failed.\n"' ERR
 #     Performs the following tasks:
 # 
 #        o Creates topography, land use and static variables
-#        o Ungrib GFS or ERA5 data
+#        o Downloads ICON (get_icon_dwd.bash) or IFS (get_ifs_ecmwf.bash) data   [ICON/IFS]
+#        o Ungrib GFS or ERA5 data, or converts ICON/IFS (icon2wps.py/ifs2wps.py) [ICON/IFS]
 #        o Interpolates to model the grid
 #        o Creates initial and boundary conditions
 #        o Creates scripts to run the model and post-processing (CR: to be modified to phase 3 and 4)
@@ -27,13 +28,18 @@ then
    echo ""
    echo "${0} EXP RES_MESH LABELI FCST"
    echo ""
-   echo "EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)"
+   echo "EXP         :: Initial or lateral boundary condition dataset (GFS, ERA, ICON or IFS)"
    echo "RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)"
    echo "LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
    echo "FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
    echo ""
    echo "Example of a 24-hour forecast:"
    echo "${0} GFS 655362 2026080100 24"
+   echo "${0} ICON 655362 $(date -u +%Y%m%d)00 24"
+   echo ""
+   echo "ICON and IFS are downloaded automatically (needs internet: run it on a login node)."
+   echo "Usually only RECENT runs are online: ICON (DWD) ~last 24 h; IFS (ECMWF) ~last 3 days,"
+   echo "or older IFS runs with 'export IFS_SOURCE=aws'. Files already in datain/ICON|IFS are reused."
    echo ""
    exit
 fi
@@ -79,6 +85,17 @@ export DIRRUN=${DIRHOMED}/run.${YYYYMMDDHHi}; rm -fr ${DIRRUN}; mkdir -p ${DIRRU
 
 echo -e  "${GREEN}==>${NC} Scripts_CD-CT last commit: \n"
 git log | head -1
+
+# [ICON/IFS] Download antes de tudo: se a rodada nao estiver mais online, para aqui.
+if [[ ${EXP} == "ICON" ]]
+then
+   echo -e "${GREEN}==>${NC} Downloading ICON ${YYYYMMDDHHi} (+${FCST} h)...\n"
+   time ./get_icon_dwd.bash ${YYYYMMDDHHi} ${FCST}
+elif [[ ${EXP} == "IFS" ]]
+then
+   echo -e "${GREEN}==>${NC} Downloading IFS ${YYYYMMDDHHi} (+${FCST} h)...\n"
+   time ./get_ifs_ecmwf.bash ${YYYYMMDDHHi} ${FCST}
+fi
 
 if [ ! -d ${DATAIN}/fixed ]; then
     echo -e "${GREEN}==>${NC} copying and linking fixed input data ${SYSTEM_KEYC}... \n"
@@ -172,7 +189,7 @@ cd ${SCRIPTS}
 
 
 # Creating the x1.${RES}.static.nc file once, if does not exist yet:---------------
-if [[ ${EXP} == "GFS" || ${EXP} == "ERA" ]]; then
+if [[ ${EXP} == "GFS" || ${EXP} == "ERA" || ${EXP} == "ICON" || ${EXP} == "IFS" ]]; then
    if [ ! -s ${DATAIN}/fixed/x1.${RES}.static.nc ]
    then
       echo -e "${GREEN}==>${NC} Creating static.bash for submiting init_atmosphere to create x1.${RES}.static.nc...\n"
@@ -182,7 +199,7 @@ if [[ ${EXP} == "GFS" || ${EXP} == "ERA" ]]; then
    fi
 else
    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
-   echo -e  "${RED}==>${NC} Static phase fails! Please select EXP=GFS or EXP=ERA.\n"
+   echo -e  "${RED}==>${NC} Static phase fails! Please select EXP=GFS, EXP=ERA, EXP=ICON or EXP=IFS.\n"
    echo -e  "${RED}==>${NC} Exiting script. \n"
    exit 1
 fi
@@ -198,21 +215,29 @@ elif [[ ${EXP} == "ERA" ]]
 then
    echo -e  "${GREEN}==>${NC} Submitting Degrib for ERA data...\n"
    time ./make_degrib_ERA5.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST}
+elif [[ ${EXP} == "ICON" ]]
+then
+   echo -e  "${GREEN}==>${NC} Converting ICON data (CDO remap + icon2wps.py)...\n"
+   time ./make_degrib_ICON.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST}
+elif [[ ${EXP} == "IFS" ]]
+then
+   echo -e  "${GREEN}==>${NC} Converting IFS data (ifs2wps.py)...\n"
+   time ./make_degrib_IFS.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST}
 else
    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
-   echo -e  "${RED}==>${NC} Degrib phase fails! Please select EXP=GFS or EXP=ERA.\n"
+   echo -e  "${RED}==>${NC} Degrib phase fails! Please select EXP=GFS, EXP=ERA, EXP=ICON or EXP=IFS.\n"
    echo -e  "${RED}==>${NC} Exiting script. \n"
    exit 1
 fi
 #----------------------------------------------------------------------------------
 
 # Init Atmosphere phase:------------------------------------------------------------
-if [[ ${EXP} == "GFS" || ${EXP} == "ERA" ]]; then
+if [[ ${EXP} == "GFS" || ${EXP} == "ERA" || ${EXP} == "ICON" || ${EXP} == "IFS" ]]; then
    echo -e  "\n${GREEN}==>${NC} Submitting Init Atmosphere for real case...\n"
    time ./make_initatmos.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST}
 else
    echo -e  "\n${RED}==>${NC} ***** ATTENTION *****\n"
-   echo -e  "${RED}==>${NC} Init Atmosphere phase fails! Please select EXP=GFS or EXP=ERA.\n"
+   echo -e  "${RED}==>${NC} Init Atmosphere phase fails! Please select EXP=GFS, EXP=ERA, EXP=ICON or EXP=IFS.\n"
    echo -e  "${RED}==>${NC} Exiting script. \n"
    exit 1
 fi

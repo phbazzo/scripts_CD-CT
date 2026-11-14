@@ -1,305 +1,178 @@
-# Scripts CD-CT
+# MONAN com ICON e IFS como condição inicial e de contorno
 
-Scripts for Continuos Deployment & Continuous Testing for MONAN (Model for Ocean-laNd-Atmosphere PredictioN).
+> **English summary.** Fork of the official MONAN workflow scripts
+> ([`monanadmin/scripts_CD-CT`](https://github.com/monanadmin/scripts_CD-CT), release **1.6.0**) that adds
+> the **DWD ICON** and **ECMWF IFS** open-data forecasts as initial and lateral boundary conditions
+> (`EXP=ICON` / `EXP=IFS`), next to the existing GFS and ERA5. Data are downloaded automatically, converted
+> straight to WPS intermediate files (no `ungrib`/Vtable) and fed to `init_atmosphere`. Global and regional
+> modes, optional custom vertical grid (`config_specified_zeta_levels`). Documentation is in Portuguese.
 
-## Get Started
+Este repositório é um *fork* dos scripts oficiais do MONAN (`scripts_CD-CT` 1.6.0). Ele acrescenta duas
+novas fontes de condição inicial (CI) e de contorno lateral (CC):
 
-**Getting the scritps:**
+| `EXP` | Fonte | Grade original | Níveis verticais | Disponível online | Passa pelo `ungrib`? |
+|---|---|---|---|---|---|
+| `GFS` | NCEP (já existia) | 0,25° | 34 de pressão | — | sim |
+| `ERA` | ERA5 (já existia) | 0,25° | pressão | arquivo | sim |
+| **`ICON`** | DWD, ICON global | icosaédrica ~13 km → 0,125° | **~75 níveis nativos do modelo** (ou 18 de pressão) | **últimas ~24 h** | não |
+| **`IFS`** | ECMWF, IFS HRES | 0,1° (ou 0,25°) | 14 de pressão | **últimos ~3 dias** (ou arquivo na AWS desde 2023) | não |
+
+O resto da cadeia (`init_atmosphere`, modelo, pós) é o do MONAN, sem alteração de física ou de dinâmica.
+As mudanças nos scripts oficiais são pequenas e ficam marcadas com `[ICON/IFS]`
+([lista completa](docs/08-mudancas-nos-scripts-oficiais.md)).
+
+---
+
+## Estado de validação
+
+| O quê | Situação |
+|---|---|
+| ICON regional, níveis do modelo: download → conversão → `init_atmosphere` (CI e LBC) | **testado** em supercomputador PBS/Cray, malha regional de 3 km no Sul do Brasil (versão anterior destes scripts) |
+| ICON → `3.run_model.bash` | a falta de `Vtable.ICON` que parava a rodada foi corrigida; **integração do modelo ainda não confirmada** |
+| IFS (download, conversão, init) | download conferido contra o portal do ECMWF; **cadeia completa ainda não testada** |
+| Grade vertical própria (`ZETA_LEVELS`, L75) | opção conferida no código do MONAN 2.0.0-rc, 1.4.5 e 1.4.3-rc; **rodada completa não testada** |
+| Modo global com ICON/IFS | implementado, **não testado** (exige muita memória no ICON, ver avisos) |
+| Qualidade das previsões | **não avaliada.** Compare com uma rodada GFS antes de usar em trabalho científico |
+
+Relate problemas e resultados nas *issues* do repositório.
+
+---
+
+## Início rápido
+
+### Opção A — usar este fork como seu `scripts_CD-CT`
+
+```bash
+git clone https://github.com/phbazzo/MONAN-ICON-IFS.git scripts_CD-CT   # o nome da pasta TEM de ser scripts_CD-CT
+cd scripts_CD-CT/scripts
+./1.install_monan.bash https://github.com/monanadmin/MONAN-Model.git 2.0.0-rc 1.2.0   # como no MONAN oficial
+```
+
+### Opção B — aplicar numa instalação existente (`scripts_CD-CT` 1.6.0)
+
+```bash
+git clone https://github.com/phbazzo/MONAN-ICON-IFS.git
+./MONAN-ICON-IFS/instalar.sh /caminho/para/scripts_CD-CT
+```
+
+O `instalar.sh` confere a versão, testa se o patch aplica sem conflito, guarda cópia dos arquivos originais,
+aplica e verifica se o Python e o `cdo` necessários existem. Detalhes em [docs/02-instalacao.md](docs/02-instalacao.md).
+
+### Ambiente Python (uma vez)
+
+A conversão dos GRIB2 precisa de **Python com `numpy` e `eccodes`** e, para o ICON, do **`cdo`**:
+
+```bash
+conda create -n monan_grib -c conda-forge python numpy python-eccodes cdo
+```
+
+Não é preciso ativar o ambiente: os scripts procuram sozinhos um Python com `numpy` + `eccodes` nos ambientes
+conda do usuário (função `find_python` do `setenv.bash`) e usam o `cdo` do mesmo ambiente.
+
+### Rodar
+
+Os comandos e argumentos são os mesmos do MONAN oficial; só muda o `EXP`. **Rode no nó de login**, porque o
+pré-processamento baixa os dados e precisa de internet:
+
+```bash
+cd scripts_CD-CT/scripts
+./2.pre_processing.bash ICON 655362 $(date -u +%Y%m%d)00 24    # baixa, converte, init (e LBC se regional)
+./3.run_model.bash      ICON 655362 $(date -u +%Y%m%d)00 24
+./4.run_post.bash       ICON 655362 $(date -u +%Y%m%d)00 24
+```
+
+Para o IFS, troque `ICON` por `IFS`. Para rodadas de dias anteriores do IFS: `export IFS_SOURCE=aws`.
+
+---
+
+## ⚠️ Avisos importantes (leia antes de rodar)
+
+1. **Só rodadas recentes estão online.** O DWD mantém o ICON por ~24 h e o ECMWF mantém o IFS por ~3 dias
+   (o IFS fica também no arquivo da AWS desde 2023). Não existe arquivo público gratuito do ICON: **para estudar um
+   caso passado com ICON, baixe os dados no dia.** Os arquivos baixados ficam em `datain/ICON|IFS/LABELI` e são
+   reaproveitados.
+2. **A mesma data com duas fontes se sobrescreve.** Os scripts oficiais gravam em `dataout/LABELI/{Pre,Model,Post}`
+   sem separar por `EXP`. Rodar o `2.pre_processing.bash` do GFS depois do ICON troca o `x1.RES.init.nc` e as
+   `lbc.*.nc`, e o `3.run_model.bash ICON` passaria a rodar com CI do GFS. Para comparar fontes, termine a cadeia
+   de uma fonte (2 → 3 → 4) e renomeie a pasta antes da próxima (`mv dataout/LABELI dataout/LABELI.ICON`).
+   Nunca rode duas fontes da mesma data ao mesmo tempo.
+3. **Download e conversão rodam no nó de login.** Eles usam CPU, memória e disco: ICON regional com 48 h e LBC de
+   3 em 3 h baixa **~22 GB** (~1,3 GB por horário) e usa até `ICON_NPROC` processos. O IFS a 0,1° baixa ~0,2 GB
+   por horário. O ICON **global** gera um intermediário de vários GB e precisa de **~10 GB de RAM** na conversão.
+   Confira as regras de uso do nó de login do seu centro.
+4. **Intervalo das LBCs (`LBCINT`).** ICON: múltiplo de 1 h (de 3 h depois de +78 h), até +180 h (00/12 UTC) ou
+   +120 h (06/18 UTC). IFS: múltiplo de 3 h (de 6 h depois de +144 h); as rodadas 06/18 UTC vão só até +144 h. Os
+   scripts conferem isso antes de baixar.
+5. **Resolução vertical da CI.** O ICON nos níveis do modelo (padrão) traz ~75 níveis, com todos os níveis nativos
+   até 16 km. O IFS do *open data* tem **só 14 níveis de pressão**, com 1000, 925 e 850 hPa na camada limite, e o
+   ICON em pressão tem 18. A estrutura da camada limite na CI fica bem mais grosseira nesses dois casos. O ICON
+   em pressão também vai só até **30 hPa (~24 km)**, abaixo do topo padrão do MONAN (30 km), e o IFS chega a
+   10 hPa (~31 km).
+6. **Solo, neve e gelo vêm de outro modelo.** A umidade e a temperatura do solo do ICON (8 camadas de umidade, 9 níveis de
+   temperatura) e do IFS (4 camadas) são reagrupadas nas 4 camadas do GFS (0–10, 10–40, 40–100 e 100–200 cm). O Noah-MP do MONAN usa
+   outra textura de solo, então espere um ajuste nas primeiras horas. No IFS, o gelo marinho é binário
+   (`sithick > 0`), porque a fração de gelo não está no *open data*.
+7. **Recorte automático no modo regional.** Com `ICON_BOX=auto` (padrão), a caixa lat-lon dos dados é a da sua malha
+   (`x1.RES.static.nc`) mais 5° de margem (`GRIB_BOX_MARGIN`). Se trocar de malha, nada precisa mudar. Para usar
+   uma caixa fixa, defina `ICON_BOX=lon1,lon2,lat1,lat2`, que precisa cobrir toda a malha.
+8. **Grade vertical própria é opcional e afeta tudo.** `NVERTLEV`/`ZETA_LEVELS` (no `setenv.bash`) mudam o
+   `init.nc`, as LBCs e o nome dos arquivos (`...L75.nc`). Também mudam o custo (+~36 % com 75 níveis em vez de 55)
+   e podem exigir outro `config_dt` (CFL vertical). Rode de novo o pré-processamento depois de mudar.
+   Veja [docs/05-niveis-verticais.md](docs/05-niveis-verticais.md).
+9. **Mensagens inofensivas no log:** `ECCODES ERROR : pack_bytes: Wrong size (20) for section2Padding` (filtrada)
+   e `bunzip2: ... trailing garbage after EOF ignored`. Ambas vêm dos arquivos do DWD e não afetam os dados.
+10. **Dados de terceiros.** ICON (DWD Open Data) e IFS (ECMWF Open Data) exigem citação da fonte. Confira os termos
+    de uso de cada provedor ([DWD](https://www.dwd.de/EN/service/copyright/copyright_node.html),
+    [ECMWF](https://www.ecmwf.int/en/forecasts/datasets/open-data)).
+
+Lista completa e soluções: [docs/07-avisos-e-solucao-de-problemas.md](docs/07-avisos-e-solucao-de-problemas.md).
+
+---
+
+## Documentação
+
+| Documento | Conteúdo |
+|---|---|
+| [01 – Visão geral](docs/01-visao-geral.md) | Como funciona: do GRIB2 ao `init.nc`, por que não usar o `ungrib` e o papel de cada componente |
+| [02 – Instalação](docs/02-instalacao.md) | Fork × patch, ambiente Python/`cdo`, como conferir |
+| [03 – ICON](docs/03-icon.md) | Dados do DWD, níveis do modelo × pressão, escolha dos níveis, remapeamento, solo |
+| [04 – IFS](docs/04-ifs.md) | *Open data* do ECMWF, resoluções, fontes (portal/AWS), streams, campos |
+| [05 – Níveis verticais](docs/05-niveis-verticais.md) | `NVERTLEV`, `ZETA_LEVELS`, `zeta_levels.py`, relação com os níveis do ICON |
+| [06 – Configuração por objetivo](docs/06-configuracao.md) | Todas as variáveis e receitas (outra região, casos passados, menos disco, global...) |
+| [07 – Avisos e solução de problemas](docs/07-avisos-e-solucao-de-problemas.md) | O que pode dar errado, mensagens de erro e o que fazer |
+| [08 – Mudanças nos scripts oficiais](docs/08-mudancas-nos-scripts-oficiais.md) | Cada alteração, arquivo por arquivo, para aplicar à mão em outras versões |
+| [README do scripts_CD-CT](README_scripts_CD-CT.md) | README original do MONAN (instalação, modo regional, malhas) |
+
+## Estrutura (o que é novo)
 
 ```
-$ git clone https://github.com/monanadmin/scripts_CD-CT.git
-$ cd scripts_CD-CT/scripts
-```
-
-### 1. Install the model and configuring the execution mode (Global or Regional):
-
-- First, you need to fork the official MONAN repository into your GitHub account. For detailed instructions, see [Creating a MONAN‐Model Fork](https://github.com/monanadmin/MONAN-Model/wiki/Creating-a-MONAN%E2%80%90Model-Fork).
-- Then, you can install the model in your working directory (lustre or beegfs) by running:
-
-~~~
-./1.install_monan.bash <https://github.com/MYUSER/MONAN-Model-My-Fork.git> <tag_or_branch_name_MONAN-Model> <tag_or_branch_name_Convert-MPAS>
-~~~
-Default values:
-~~~
-<tag_or_branch_name_MONAN-Model> = "2.0.0-rc"
-<tag_or_branch_name_Convert-MPAS> = "1.2.0"
-~~~
-
-**Note:** To simply run the official version of the MONAN repository, you only need to enter the URL `https://github.com/monanadmin/MONAN-Model.git` instead of the URL of your fork.
-
-Example:
-~~~
-./1.install_monan.bash https://github.com/monanadmin/MONAN-Model.git 2.0.0-rc 1.2.0
-~~~
-
-- This first step will create a standart diretories structures for work:
-~~~
 scripts_CD-CT/
-       scripts
-       sources
-       execs
-       datain
-       dataout
-~~~
-
-Where:
-- `scripts` folder will contain all scripts produced to run all steps of the model;
-- `scripts/namelists` directory contains all versioned namelists needded for run and compile all phases of model;
-- `scripts/stools` directory contains template scripts for execution on SLURM and PBS, and scripts for the operation of the PBS_Intel, PBS_GNU, and PBS_Cray environments.
-- `sources` folder will contain all codes of any processes that uses compiled programming languages, such as MONAN model sources, convert_mpas sources, etc.
-- `execs` folder will contain all the executables needed;
-- `datain` folder will contain all the input data that the model need to run;
-- `dataout` folder will contain all the output files generated of running of the MONAN, such as:
-     - `dataout\Pre\<YYYYMMDDHH>` will contain all the output files from the pre-processing phase, mostly are all the initial condition for run the MONAN;
-     - `dataout\Model\<YYYYMMDDHH>` will contain all the output files from the MONAN model;
-     - `dataout\Post\<YYYYMMDDHH>` will contain all the output files from the post-processing phase of the MONAN;
-
-After running the first step, it will clone the MONAN model from your fork repo in a `sources` diretory.
-
-**Configuring the execution mode (Global or Regional):**
-
-The default execution mode is "Global", to set the execution mode to "Regional" (limited-area), follow these steps:
-
-```
-$ vi scripts/setenv.bash
-(...)
-MODERUN=R      | R=Regional simulation and G=Global simulation.
-LBCINT=10800   | Option: nterval (seconds) for updating lateral boundary conditions (when regional mode).
-```
-After this change, you must specify the regional grid/mesh in the `RES_MESH` parameter during the subsequent steps (2, 3, and 4) described below.
-
-Currently, the available regional options are:
-
-```
-30km_LAC  =>  30 km for Latin America and the Caribbean (excl. Mexico)
-10km_LAC  =>  10 km for Latin America and the Caribbean (excl. Mexico)
-05km_LAC  =>  05 km for Latin America and the Caribbean (excl. Mexico)
-```
-For these meshes, the Scripts_CD-CT are configured to automatically set the appropriate CONFIG_DT (time step), as well as the LAT and LON values used by Convert_MPAS.
-
-
-**Using custom regional (limited-area) meshes:**
-
-- If you wish to use your own regional mesh, copy the "x1.your_mesh_file.grid.nc" and "x1.your_mesh_file.graph.info" files to the `datain/fixed directory`.
-- The scripts will attempt to automatically determine the `CONFIG_DT` setting in "3.run_model.bash" and the target domain parameters required by convert_mpas in "4.run_post.bash". If the automatic configuration fails for your custom mesh, you must add an appropriate "if-block" to configure `CONFIG_DT` in "3.run_model.bash" (around line 114), as well as the target domain parameters (STARTLAT, ENDLAT, STARTLON, ENDLON, NLAT, NLON, etc.) used by convert_mpas in "4.run_post.bash" (around line 182).
-
-**Attention!** When using "your_mesh_file", do not use the same identifier (the "RES_MESH" parameter) as an existing global mesh. If the identifier is already in use, you must rename your mesh files to match the new identifier and use the new identifier in the "RES_MESH" parameter.
-
-- In the `RES_MESH` parameter, pass only "your_mesh_file", without the "x1." prefix and the ".grid.nc" or ".graph.info" extensions. But "your_mesh_file" (in datain/fixed) needs the format: "x1.your_mesh_file.grid.nc" and "x1.your_mesh_file.graph.info".
-
-For example, for "your_mesh_file":
-```
-x1.5898242_BRASIL.grid.nc
-x1.5898242_BRASIL.graph.info
-```
-The `RES_MESH` parameter should be set to: `5898242_BRASIL`
-
-**ERA5 Simulation**
-
-- To perform simulations using ERA5 data, you must set the `EXP` parameter to `ERA` in steps 2, 3, and 4 below.
-
-- We do not yet have a centralized location with regular dates or a standardized naming convention for ERA5 files, as we currently do for GFS data. Therefore, you will need to copy the `.pl` and `.sl` files to the `datain/ERA` folder and rename them according to the following pattern:
-
-```
-era5.pl.YYYYMMDDHH.grib
-era5.sl.YYYYMMDDHH.grib
-```
-Where: `YYYY=year; MM=month; DD=day and HH=hour`
-
-### 2. Prepare the Initial Conditions for the model:
-
-Just run the second script as follows:
-
-~~~
-2.pre_processing.bash EXP RES_MESH LABELI FCST
-
-where:
-
-EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)
-RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)
-LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100
-FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)
-
-~~~
-Example of a 24-hour forecast:
-
-~~~
-./2.pre_processing.bash GFS 655362 2026080100 24
-~~~
-
-**Note:** For regional (limited-area) simulations, forecast or analysis files beyond the initial one are required to provide the lateral boundary conditions. The interval between these files is determined by the "LBCINT" variable in `setenv.bash`, while the total number of files required depends on the forecast duration specified by FCST.
-
-### 3. Run the model:
-
-Execute the 3rd step script:
-
-~~~
-3.run_model.bash EXP RES_MESH LABELI FCST
-
-where:
-
-EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)
-RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)
-LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100
-FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)
-
-~~~
-Example of a 24-hour forecast:
-
-~~~
-./3.run_model.bash GFS 655362 2026080100 24
-~~~
-
-### 4. Run the post-processing model:
-
-Execute the step 4 script:
-
-~~~
-./4.run_post.bash EXP RES_MESH LABELI FCST
-
-where:
-
-EXP         :: Initial or lateral boundary condition dataset (GFS or ERA)
-RES_MESH    :: Number of horizontal grid cells (global) or regional mesh identifier (e.g., 655362 for the ~30 km mesh)
-LABELI      :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100
-FCST        :: Forecast length in hours (e.g., 24, 36, 48, etc.)
-
-~~~
-Example of a 24-hour forecast:
-~~~
-./4.run_post.bash GFS 655362 2026080100 24
-~~~
-
-### Plus: The "0.run_all.bash" script
-
-This script automates the steps required to run MONAN.
-
-The logic consists of removing or adding comments at the corresponding steps, as needed.
-
-```
-$ cd scripts
-$ vi 0.run_all.bash
-
-(...)
-# Input variables:-----------------------------------------------------
-github_link="https://github.com/monanadmin/MONAN-Model.git"   # Switch to your fork when you need to make changes or develop the model.
-monan_branch=2.0.0-rc
-convertmpas_branch=1.2.0
-EXP=GFS                    # (EXP) Options: GFS or ERA.
-RES=655362                 # (RES_MESH) Options-Global:    40962 = 120km; 
-                           #                              163842 =  60km;
-                           #                              655362 =  30Km;
-                           #                             1024002 =  24km;
-                           #                             2621442 =  15Km;
-                           #                             5898242 =  10Km.
-                           #            Options-Regional (default): 30km_LAC = 30km Latin America and the Caribbean (excl. Mexico);
-                           #                                        10km_LAC = 10km Latin America and the Caribbean (excl. Mexico);
-                           #                                        05km_LAC = 05km Latin America and the Caribbean (excl. Mexico).
-                           #                                        <your_mesh> saved in 'datain/fixed' (x1.<your_mesh>).
-YYYYMMDDHHi=2026080100     # (LABELI) Check the available dates for the initial and boundary conditions (regional), especially for ERA5 data.
-FCST=24                    # (FCST).
-#----------------------------------------------------------------------
-
-# STEP 1: Installing and compiling the A-MONAN model and utility programs:
-time ${SCRIPTS}/1.install_monan.bash ${github_link} ${monan_branch} ${convertmpas_branch}
-#exit
-
-# STEP 2: Executing the pre-processing fase. Preparing all CI/CC files needed:
-time ${SCRIPTS}/2.pre_processing.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST} 
-#exit
-
-# STEP 3: Executing the Model run:
-time ${SCRIPTS}/3.run_model.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST} 
-#exit
-
-# STEP 4: Executing the Post of Model run:
-time ${SCRIPTS}/4.run_post.bash ${EXP} ${RES} ${YYYYMMDDHHi} ${FCST} 
-#exit
+├── instalar.sh                     novo: aplica o patch numa instalação existente
+├── patches/icon_ifs_scripts_CD-CT-1.6.0.patch
+├── docs/                           novo: documentação
+└── scripts/
+    ├── setenv.bash                 alterado: variáveis ICON_*/IFS_*, NVERTLEV/ZETA_LEVELS e funções auxiliares
+    ├── 2.pre_processing.bash       alterado: baixa e converte ICON/IFS
+    ├── make_initatmos.bash         alterado: grade vertical opcional, config_nfglevels do ICON
+    ├── make_lbcs.bash              alterado: idem
+    ├── 3.run_model.bash            alterado: ICON/IFS sem Vtable; L${NVERTLEV} no nome
+    ├── 4.run_post.bash             alterado: L${NVERTLEV} no nome
+    ├── get_icon_dwd.bash           novo: download do ICON (DWD opendata)
+    ├── make_degrib_ICON.bash       novo: ICON → intermediário WPS (chama icon2wps.py)
+    ├── icon2wps.py                 novo: conversor do ICON (e funções comuns de escrita do intermediário)
+    ├── icon_levels.py              novo: escolhe os níveis do modelo do ICON a partir do config_ztop
+    ├── get_ifs_ecmwf.bash          novo: download do IFS (ECMWF open data / AWS)
+    ├── make_degrib_IFS.bash        novo: IFS → intermediário WPS (chama ifs2wps.py)
+    ├── ifs2wps.py                  novo: conversor do IFS
+    ├── mesh_box.py                 novo: caixa lat-lon da malha regional (recorte automático)
+    ├── wps_inventory.py            novo: lista campos/níveis de um intermediário (diagnóstico)
+    ├── zeta_levels.py              novo: gera arquivos de alturas para config_specified_zeta_levels
+    └── namelists/zeta_levels.L75.txt   novo: exemplo de grade L75 (topo 30 km)
 ```
 
-Example:
-```
-./0.run_all.bash
-```
+## Créditos
 
-## History
-
-**1.6.0**
-
-- Added backward compatibility with previous MONAN versions through namelist separation.
-- Added support for MONAN regional (limited-area) simulations.
-- Added support for initializing simulations from ERA5 data.
-
-**1.5.0**
-- Updated the workflow for full compatibility with MONAN 2.0.0, including support for the Noah-MP land surface model and the UGWP parameterization.
-- Updated the pre-processing, execution, and post-processing scripts, including the required static files, streams, and namelist configurations.
-- Added new diagnostic variables for accumulated surface fluxes and optimized the generation of the "MP_THOMPSON_*_DATA.DBL" tables by creating them only during the first pre-processing execution, while integrating the build_tables step into the workflow.
-- Improved the compilation environment with support for the NVIDIA NVHPC compiler.
-
-**1.4.1**
-- Compatibility with MONAN 1.4.4, including support for the new cold-start flags in namelist.atmosphere.TEMPLATE: config_coldstart_substeps and config_coldstart_steps_to_substep.
-- Updated config_smdiv to 0.15 in namelist.atmosphere.TEMPLATE.
-- Adjusted permissions for log files and included the job ID in output filenames.
-- Commented out the MPICH REPORT section in the stools files.
-- Added support for the Cray compiler.
-
-**1.4.0**
-- Compatibility with MONAN 1.4.3-rc.
-- Support for multi-environment: 'Jaci' supercomputer (intel and gnu compilers and PBS scheduler) and 'Egeon' cluster (gnu compiler and SLURM scheduler).
-
-**1.3.0**
-- This version was created to work in operational runs.
-- Adjusted to run using 16 nodes and 1024 cores.
-- Operational vars (cldfrac_tot_UPP, ter, landmask, and omega) table is also in this version.
-- Add flags for ~10Km mesh resolution.
-
-**1.2.0**
-- This version should work only with MONAN-Model 1.3.1/ (3D native model variables)
-- Was added some warnings to users regarding the choice of MONAN-Model versions versus scripts_CD-CT versions:
-- scripts_CD-CT versions up to 1.1.0 run MONAN-Model only versions up to 1.3.0
-- scripts_CD-CT versions 1.2.0 onwards run MONAN-Model only versions 1.3.1 onwards
-- 
-**1.1.0**
-- Fixed `model.bash` script to check generated files with flexible output_interval field (no longer with constant 3h).
-- Now it is possible to run all 4 phases with 00z, 06z, 12z and 18z.
-- Namelist `namelist.atmosphere.TEMPLATE` was updated to work with MONAN-Model version 1.3.0/, especific `convection_permitting_monan` phisic suite.
-
-**1.0.1**
-- Fixing nIsobaricLev(22) in convert_mpas.nml and config_dt(15000) in run_model script.
-
-**1.0.0**
-- Changing integration method (3rd Rung-Kutta), time step (150s), nlat and nlon for post processing at 15km and minor adjustments.
-- adding configurations for 15km.
-- correction on logic of how many submiting will be computed if nfiles were little then maxpostpernodes.
-- new parallel post.
-- Target_domain values have been fixed.
-- Add copy configs files from convert_mpas to dataout/YYYYMMDDHH/Post/logs (MODEL config files and VERSION.txt also).
-- fix in config_len_disp in script 3.run_model.bash .
-- modifications in datain/namelists/namelist.atmosphere.TEMPLATE and 3.run_model.bash from Saulo's PR 8 .
- 
-**0.2.2**
-- Fixed the value of config_bucket_update in namelist.atmosphere.
-- Fixed module load in opengrads in setenv.
-
-**0.2.1**
-- Switch of configs (CONFIG_DT, CONFIG_LEN_DISP, target_domain, etc.) 120 and 24 km.
-- Clean temporary outputs files option add in the 3.run_model.bash script.
-- Verification if all the output files were created ok from model phase.
-
-**0.2.0**
-- Including copy of the GF_ConvPar_nml from model source to scripts folder.
-- Changing physics suite to mesoscale_reference_monan.
-- Changing the output model interval to 3h adjusting the post processing.
-- Changing the radtlw and radtsw interval to 30m, and conv interval to 15m.
-
-**0.1.1**
-- Fixing bug on pressure levels description in post files
-- Fixing variables name in post files
-
-**0.1.0**
-- Used parameterization to select the date for execution.
-- Created cron script for daily executions.
-- Post-processing is with the new version of convert_mpas, enabling the use of grads.
-- Grouping all variables with one pressure level to only one variable with all levels.
-- Defined default version of MONAN-Model (0.5.0) and convert_mpas (0.1.0) in the installation step.
-
+- Scripts originais: equipe do MONAN / INPE, [`monanadmin/scripts_CD-CT`](https://github.com/monanadmin/scripts_CD-CT)
+  (o histórico do repositório original foi mantido neste fork).
+- Suporte a ICON e IFS: [@phbazzo](https://github.com/phbazzo).
+- Dados: Deutscher Wetterdienst (ICON, DWD Open Data) e ECMWF (IFS, ECMWF Open Data).
