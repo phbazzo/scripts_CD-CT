@@ -2116,7 +2116,7 @@ index 59ad3fd..3ce3aea 100755
     echo "LABELI        :: Forecast initialization date and time (YYYYMMDDHH), e.g., 2026080100"
     echo "FCST          :: Forecast length in hours (e.g., 24, 36, 48, etc.)"
 diff --git a/scripts/setenv.bash b/scripts/setenv.bash
-index 9ed282c..9d5484c 100755
+index 9ed282c..47ea3e9 100755
 --- a/scripts/setenv.bash
 +++ b/scripts/setenv.bash
 @@ -5,6 +5,43 @@ umask 022
@@ -2124,7 +2124,7 @@ index 9ed282c..9d5484c 100755
  export LBCINT=10800  # Interval (seconds) for updating lateral boundary conditions (when regional mode).
  
 +# ==== [ICON/IFS] CI/CC do ICON (DWD) e do IFS (ECMWF) ======================================================
-+# Usados com EXP=ICON ou EXP=IFS (ver docs/ no repositorio MONAN-ICON-IFS). Todos podem ser trocados na
++# Usados com EXP=ICON ou EXP=IFS (ver docs/ em github.com/phbazzo/scripts_CD-CT). Todos podem ser trocados na
 +# linha de comando sem editar este arquivo, ex.:  ICON_VCOORD=pressure ./2.pre_processing.bash ICON ...
 +#
 +# Python com numpy + eccodes (converte os GRIB2). Vazio = procura sozinho (find_python, abaixo) nos ambientes

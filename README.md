@@ -5,7 +5,8 @@
 > the **DWD ICON** and **ECMWF IFS** open-data forecasts as initial and lateral boundary conditions
 > (`EXP=ICON` / `EXP=IFS`), next to the existing GFS and ERA5. Data are downloaded automatically, converted
 > straight to WPS intermediate files (no `ungrib`/Vtable) and fed to `init_atmosphere`. Global and regional
-> modes, optional custom vertical grid (`config_specified_zeta_levels`). Documentation is in Portuguese.
+> modes, optional custom vertical grid (`config_specified_zeta_levels`). Tested end to end (regional 3 km mesh,
+> 75 levels) with GFS, ICON and IFS. Documentation is in Portuguese.
 
 Este repositório é um *fork* dos scripts oficiais do MONAN (`scripts_CD-CT` 1.6.0). Ele acrescenta duas
 novas fontes de condição inicial (CI) e de contorno lateral (CC):
@@ -27,10 +28,9 @@ As mudanças nos scripts oficiais são pequenas e ficam marcadas com `[ICON/IFS]
 
 | O quê | Situação |
 |---|---|
-| ICON regional, níveis do modelo: download → conversão → `init_atmosphere` (CI e LBC) | **testado** em supercomputador PBS/Cray, malha regional de 3 km no Sul do Brasil (versão anterior destes scripts) |
-| ICON → `3.run_model.bash` | a falta de `Vtable.ICON` que parava a rodada foi corrigida; **integração do modelo ainda não confirmada** |
-| IFS (download, conversão, init) | download conferido contra o portal do ECMWF; **cadeia completa ainda não testada** |
-| Grade vertical própria (`ZETA_LEVELS`, L75) | opção conferida no código do MONAN 2.0.0-rc, 1.4.5 e 1.4.3-rc; **rodada completa não testada** |
+| Cadeia completa (pré-processamento → modelo → pós) com L75 (`ZETA_LEVELS=zeta_levels.L75.txt`), regional | **testada** com `EXP=GFS`, `ICON` e `IFS` em supercomputador PBS/Cray, malha regional de 3 km no Sul do Brasil (novembro de 2026, versão de desenvolvimento destes scripts) |
+| ICON regional, níveis do modelo (CI e LBC) | **testado** (ver linha acima) |
+| IFS regional, rodadas 00/12 UTC | **testado** (ver linha acima). Rodadas 06/18 UTC (stream `oper`, detectado automaticamente) ainda não testadas |
 | Modo global com ICON/IFS | implementado, **não testado** (exige muita memória no ICON, ver avisos) |
 | Qualidade das previsões | **não avaliada.** Compare com uma rodada GFS antes de usar em trabalho científico |
 
@@ -43,7 +43,7 @@ Relate problemas e resultados nas *issues* do repositório.
 ### Opção A — usar este fork como seu `scripts_CD-CT`
 
 ```bash
-git clone https://github.com/phbazzo/MONAN-ICON-IFS.git scripts_CD-CT   # o nome da pasta TEM de ser scripts_CD-CT
+git clone https://github.com/phbazzo/scripts_CD-CT.git          # a pasta TEM de se chamar scripts_CD-CT
 cd scripts_CD-CT/scripts
 ./1.install_monan.bash https://github.com/monanadmin/MONAN-Model.git 2.0.0-rc 1.2.0   # como no MONAN oficial
 ```
@@ -51,8 +51,8 @@ cd scripts_CD-CT/scripts
 ### Opção B — aplicar numa instalação existente (`scripts_CD-CT` 1.6.0)
 
 ```bash
-git clone https://github.com/phbazzo/MONAN-ICON-IFS.git
-./MONAN-ICON-IFS/instalar.sh /caminho/para/scripts_CD-CT
+git clone https://github.com/phbazzo/scripts_CD-CT.git scripts_CD-CT_icon_ifs
+./scripts_CD-CT_icon_ifs/instalar.sh /caminho/para/scripts_CD-CT
 ```
 
 O `instalar.sh` confere a versão, testa se o patch aplica sem conflito, guarda cópia dos arquivos originais,

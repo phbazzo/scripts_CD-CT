@@ -6,7 +6,7 @@ export MODERUN=G     # R=Regional simulation and G=Global simulation.
 export LBCINT=10800  # Interval (seconds) for updating lateral boundary conditions (when regional mode).
 
 # ==== [ICON/IFS] CI/CC do ICON (DWD) e do IFS (ECMWF) ======================================================
-# Usados com EXP=ICON ou EXP=IFS (ver docs/ no repositorio MONAN-ICON-IFS). Todos podem ser trocados na
+# Usados com EXP=ICON ou EXP=IFS (ver docs/ em github.com/phbazzo/scripts_CD-CT). Todos podem ser trocados na
 # linha de comando sem editar este arquivo, ex.:  ICON_VCOORD=pressure ./2.pre_processing.bash ICON ...
 #
 # Python com numpy + eccodes (converte os GRIB2). Vazio = procura sozinho (find_python, abaixo) nos ambientes

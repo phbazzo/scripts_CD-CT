@@ -21,8 +21,8 @@
 #        --force : tenta aplicar mesmo se VERSION.txt nao for 1.6.0 (pode falhar)
 #
 # !EXAMPLE:
-#     git clone https://github.com/<USUARIO>/MONAN-ICON-IFS.git
-#     ./MONAN-ICON-IFS/instalar.sh ${HOME}/monan/scripts_CD-CT
+#     git clone https://github.com/phbazzo/scripts_CD-CT.git scripts_CD-CT_icon_ifs
+#     ./scripts_CD-CT_icon_ifs/instalar.sh ${HOME}/monan/scripts_CD-CT
 #-----------------------------------------------------------------------------#
 
 set -u

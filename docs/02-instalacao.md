@@ -41,7 +41,7 @@ bash -c '. setenv.bash > /dev/null; find_python'      # deve imprimir o caminho 
 
 ```bash
 cd /sua/area/de/trabalho                  # Lustre/scratch: o MONAN gera muitos dados
-git clone https://github.com/phbazzo/MONAN-ICON-IFS.git scripts_CD-CT
+git clone https://github.com/phbazzo/scripts_CD-CT.git
 cd scripts_CD-CT/scripts
 ./1.install_monan.bash https://github.com/monanadmin/MONAN-Model.git 2.0.0-rc 1.2.0
 ```
@@ -61,8 +61,8 @@ git merge upstream/main          # resolva conflitos nos trechos marcados [ICON/
 ## Opção B — aplicar numa instalação existente
 
 ```bash
-git clone https://github.com/phbazzo/MONAN-ICON-IFS.git
-./MONAN-ICON-IFS/instalar.sh /caminho/para/scripts_CD-CT
+git clone https://github.com/phbazzo/scripts_CD-CT.git scripts_CD-CT_icon_ifs
+./scripts_CD-CT_icon_ifs/instalar.sh /caminho/para/scripts_CD-CT
 ```
 
 O `instalar.sh`:
