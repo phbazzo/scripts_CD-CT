@@ -124,7 +124,7 @@ Para o IFS, troque `ICON` por `IFS`. Para rodadas de dias anteriores do IFS: `ex
 9. **Mensagens inofensivas no log:** `ECCODES ERROR : pack_bytes: Wrong size (20) for section2Padding` (filtrada)
    e `bunzip2: ... trailing garbage after EOF ignored`. Ambas vêm dos arquivos do DWD e não afetam os dados.
 10. **Dados de terceiros.** ICON (DWD Open Data) e IFS (ECMWF Open Data) exigem citação da fonte. Confira os termos
-    de uso de cada provedor ([DWD](https://www.dwd.de/EN/service/copyright/copyright_node.html),
+    de uso de cada provedor ([DWD](https://www.dwd.de/EN/service/legal_notice/legal_notice_node.html),
     [ECMWF](https://www.ecmwf.int/en/forecasts/datasets/open-data)).
 
 Lista completa e soluções: [docs/07-avisos-e-solucao-de-problemas.md](docs/07-avisos-e-solucao-de-problemas.md).
